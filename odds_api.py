@@ -51,6 +51,25 @@ def fetch_events(sport_key):
     return response.json()
 
 
+def fetch_scores(sport_key):
+    """Get live scores for one sport. Costs 1 credit.
+
+    Because we don't ask for past days (no "daysFrom"), the API returns only
+    games that are live or upcoming. Live games include their current score.
+
+    Returns (scores, credits_remaining).
+    """
+    if not ODDS_API_KEY:
+        raise RuntimeError("ODDS_API_KEY is missing from .env")
+
+    url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores"
+    response = requests.get(
+        url, params={"apiKey": ODDS_API_KEY, "dateFormat": "iso"}, timeout=20
+    )
+    _raise_if_api_error(response)
+    return response.json(), response.headers.get("x-requests-remaining")
+
+
 def fetch_odds(sport_key, markets=MARKETS):
     """Ask The Odds API for upcoming games + odds for one sport.
 
