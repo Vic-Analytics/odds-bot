@@ -1,0 +1,48 @@
+# This file tells GitHub Actions WHEN to run the bot and HOW.
+# GitHub reads every .yml file in .github/workflows/ automatically.
+
+name: Daily odds digest
+
+on:
+  schedule:
+    # Cron times are always in UTC. 8 AM Central is 13:00 UTC in summer
+    # (daylight time) and 14:00 UTC in winter (standard time). We schedule
+    # BOTH, and main.py skips whichever one isn't really 8 AM Central.
+    - cron: "0 13 * * *"
+    - cron: "0 14 * * *"
+  # Adds a "Run workflow" button in the Actions tab, so you can test by hand.
+  workflow_dispatch:
+
+# The bot only needs to read the code, nothing more.
+permissions:
+  contents: read
+
+jobs:
+  send-digest:
+    runs-on: ubuntu-latest   # a temporary Linux machine in GitHub's cloud
+    timeout-minutes: 10      # safety net: stop the job if something hangs
+
+    steps:
+      # 1. Download your repository's code onto the temporary machine.
+      - uses: actions/checkout@v4
+
+      # 2. Install Python.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # 3. Install the libraries from requirements.txt.
+      - run: pip install -r requirements.txt
+
+      # 4. Run the bot. The secrets you stored on GitHub become environment
+      #    variables with the same names as in your .env file, which is exactly
+      #    where our code looks for them.
+      #    For scheduled runs we add --only-at-hour 8 (the daylight-saving guard).
+      #    When you click "Run workflow" yourself, it sends right away.
+      - name: Send the digest
+        run: python main.py ${{ github.event_name == 'schedule' && '--only-at-hour 8' || '' }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}

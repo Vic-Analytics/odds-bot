@@ -1,0 +1,12 @@
+# Secrets: NEVER commit this file. It holds your bot token and API keys.
+.env
+
+# Python virtual environment (a local copy of installed packages)
+.venv/
+
+# Raw API response we save while testing
+raw_odds.json
+
+# Python's compiled cache files
+__pycache__/
+*.pyc
