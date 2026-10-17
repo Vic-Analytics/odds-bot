@@ -59,8 +59,17 @@ MLB = {
     "Blue Jays": "🍁", "Nationals": "🏛️",
 }
 
+WNBA = {
+    "Dream": "🌙", "Sky": "☁️", "Sun": "☀️",
+    "Comets": "☄️",          # a Houston team starting in 2027, per your list (unverified)
+    "Wings": "🪽",           # newer emoji; swap to 🕊️ if it shows as a box
+    "Valkyries": "⚔️", "Fever": "🌡️", "Aces": "♠️", "Sparks": "✨",
+    "Lynx": "🐈", "Liberty": "🗽", "Mercury": "🪐", "Fire": "🔥",
+    "Storm": "⛈️", "Tempo": "🎵", "Mystics": "🔮",
+}
+
 # Which dictionary belongs to which league name in config.py's SPORTS.
-TEAM_EMOJI = {"NFL": NFL, "NBA": NBA, "NHL": NHL, "MLB": MLB}
+TEAM_EMOJI = {"NFL": NFL, "NBA": NBA, "NHL": NHL, "MLB": MLB, "WNBA": WNBA}
 
 
 def emoji_for(sport_name, team_name):
