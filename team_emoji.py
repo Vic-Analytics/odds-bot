@@ -10,6 +10,10 @@ so city spellings ("LA" vs "Los Angeles") don't matter. A team with no match
 simply shows without an emoji.
 """
 
+from config import SPORTS
+from soccer_emoji import soccer_emoji
+from ufc_flags import fighter_flag
+
 NFL = {
     "Cardinals": "🐦", "Falcons": "🪶", "Ravens": "🐦‍⬛", "Bills": "🦬",
     "Panthers": "🐈‍⬛", "Bears": "🐻", "Bengals": "🐯", "Browns": "🐶",
@@ -65,5 +69,19 @@ def emoji_for(sport_name, team_name):
 
 def team_label(sport_name, team_name):
     """The team name with its emoji in front, e.g. '🐂 Houston Texans'."""
+    # "Draw" is a result, not a team, so it never gets an emoji.
+    if team_name == "Draw":
+        return team_name
+
+    # Soccer clubs get kit-color dots from soccer_emoji.py (a club it doesn't
+    # know shows a plain soccer ball and is reported in the run log).
+    if SPORTS.get(sport_name, "").startswith("soccer_"):
+        return f"{soccer_emoji(team_name)} {team_name}"
+
+    # Fighters get a country flag from ufc_flags.py, if they're on that list.
+    if SPORTS.get(sport_name, "").startswith("mma_"):
+        flag = fighter_flag(team_name)
+        return f"{flag} {team_name}" if flag else team_name
+
     emoji = emoji_for(sport_name, team_name)
     return f"{emoji} {team_name}" if emoji else team_name

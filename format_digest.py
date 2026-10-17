@@ -135,7 +135,8 @@ def _format_game(game, is_soccer, is_fight=False, sport_name=""):
         if name in spreads:
             point, price, book = spreads[name]
             sp_lines.append(
-                f"{e(team_label(sport_name, name))}  <b>{point:+g}</b>  "
+                f"{e(team_label(sport_name, name))}  "
+                f"<b>{'0' if point == 0 else format(point, '+g')}</b>  "
                 f"({int(price):+d}, {e(book)})"
             )
     if sp_lines:
