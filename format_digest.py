@@ -21,6 +21,7 @@ from pathlib import Path
 
 from config import SPORT_EMOJI, SPORTS
 from games_today import CENTRAL, has_started, start_time_central
+from team_emoji import team_label
 
 # Telegram rejects messages over 4096 characters. We stay well under that and,
 # if one sport has a LOT of games, split it into several messages.
@@ -72,7 +73,7 @@ def best_spreads(game):
     return best
 
 
-def _format_game(game, is_soccer, is_fight=False):
+def _format_game(game, is_soccer, is_fight=False, sport_name=""):
     """Build the text block for one game."""
     e = html.escape  # makes names like "Brighton & Hove" safe inside HTML
 
@@ -123,7 +124,9 @@ def _format_game(game, is_soccer, is_fight=False):
     for name in order:
         if name in moneylines:
             price, book = moneylines[name]
-            ml_lines.append(f"{e(name)}  <b>{int(price):+d}</b>  ({e(book)})")
+            ml_lines.append(
+                f"{e(team_label(sport_name, name))}  <b>{int(price):+d}</b>  ({e(book)})"
+            )
     if ml_lines:
         sections.append(f"<i>Moneyline{live_tag}</i>\n" + "\n".join(ml_lines))
 
@@ -132,7 +135,8 @@ def _format_game(game, is_soccer, is_fight=False):
         if name in spreads:
             point, price, book = spreads[name]
             sp_lines.append(
-                f"{e(name)}  <b>{point:+g}</b>  ({int(price):+d}, {e(book)})"
+                f"{e(team_label(sport_name, name))}  <b>{point:+g}</b>  "
+                f"({int(price):+d}, {e(book)})"
             )
     if sp_lines:
         sections.append(f"<i>Spread{live_tag}</i>\n" + "\n".join(sp_lines))
@@ -158,7 +162,7 @@ def format_sport_messages(sport_name, games):
 
     header = f"{emoji} <b>{html.escape(sport_name)}</b> — {date_text}"
     is_fight = SPORTS.get(sport_name, "").startswith("mma_")
-    blocks = [_format_game(game, is_soccer, is_fight) for game in games]
+    blocks = [_format_game(game, is_soccer, is_fight, sport_name) for game in games]
 
     # Pack games into messages, starting a new message when one gets too long.
     continued_header = header.replace("</b>", "</b> (cont.)", 1)
