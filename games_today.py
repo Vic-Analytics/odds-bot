@@ -13,11 +13,11 @@ Usage (these are safe for your quota, see notes):
 """
 
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from config import MARKETS, SPORTS, markets_for
-from odds_api import fetch_events, fetch_odds
+from odds_api import fetch_events, fetch_odds, fetch_scores
 
 # "America/Chicago" is the official name for US Central time. Using the name
 # (instead of "UTC-6") means daylight saving time is handled automatically.
@@ -28,6 +28,11 @@ def start_time_central(game):
     """Convert a game's UTC start time to a datetime in Central time."""
     # fromisoformat understands the "...Z" format the API uses.
     return datetime.fromisoformat(game["commence_time"]).astimezone(CENTRAL)
+
+
+def has_started(game):
+    """True if the game's start time has already passed (it's live, or over)."""
+    return datetime.fromisoformat(game["commence_time"]) <= datetime.now(timezone.utc)
 
 
 def filter_today(games):
@@ -68,7 +73,26 @@ def fetch_todays_games_with_odds(sport_key, credits_left=None, markets=MARKETS):
         )
 
     games, remaining = fetch_odds(sport_key, markets)
-    return filter_today(games), remaining
+    todays = filter_today(games)
+
+    # Games that already started have live ("in-play") odds, which can look
+    # very different from pre-game odds. For those we also fetch the current
+    # score (1 extra credit, only for sports with a game already underway).
+    # Scores are a bonus: if this fails, the digest still goes out.
+    enough_credits = remaining is None or int(float(remaining)) >= 1
+    if enough_credits and any(has_started(game) for game in todays):
+        try:
+            scores, remaining_after = fetch_scores(sport_key)
+            by_id = {entry["id"]: entry for entry in scores}
+            for game in todays:
+                entry = by_id.get(game["id"])
+                if has_started(game) and entry and entry.get("scores"):
+                    game["live_scores"] = {s["name"]: s["score"] for s in entry["scores"]}
+            remaining = remaining_after or remaining
+        except Exception:
+            pass
+
+    return todays, remaining
 
 
 def describe(game):

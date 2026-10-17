@@ -20,7 +20,7 @@ from datetime import datetime
 from pathlib import Path
 
 from config import SPORT_EMOJI, SPORTS
-from games_today import CENTRAL, start_time_central
+from games_today import CENTRAL, has_started, start_time_central
 
 # Telegram rejects messages over 4096 characters. We stay well under that and,
 # if one sport has a LOT of games, split it into several messages.
@@ -92,6 +92,22 @@ def _format_game(game, is_soccer, is_fight=False):
     # game's start is easy to spot while scrolling.
     headline = f"<b>{time_text} · {matchup}</b>"
 
+    # If the game has already started, say so and show the score if we have it.
+    # Live odds move fast, so we also label the odds sections "(live)" below.
+    started = has_started(game)
+    if started:
+        scores = game.get("live_scores")
+        if scores and home in scores and away in scores:
+            # Show the score in the same order as the matchup in the headline.
+            left, right = (home, away) if is_soccer else (away, home)
+            headline += (
+                f"\n\U0001F534 <b>LIVE</b> · {e(left)} {e(str(scores[left]))}"
+                f"–{e(str(scores[right]))} {e(right)}"
+            )
+        else:
+            headline += "\n\U0001F534 <b>LIVE</b> · in progress"
+    live_tag = " (live odds)" if started else ""
+
     moneylines = best_moneylines(game)
     spreads = best_spreads(game)
     if not moneylines and not spreads:
@@ -109,7 +125,7 @@ def _format_game(game, is_soccer, is_fight=False):
             price, book = moneylines[name]
             ml_lines.append(f"{e(name)}  <b>{int(price):+d}</b>  ({e(book)})")
     if ml_lines:
-        sections.append("<i>Moneyline</i>\n" + "\n".join(ml_lines))
+        sections.append(f"<i>Moneyline{live_tag}</i>\n" + "\n".join(ml_lines))
 
     sp_lines = []
     for name in order:
@@ -119,7 +135,7 @@ def _format_game(game, is_soccer, is_fight=False):
                 f"{e(name)}  <b>{point:+g}</b>  ({int(price):+d}, {e(book)})"
             )
     if sp_lines:
-        sections.append("<i>Spread</i>\n" + "\n".join(sp_lines))
+        sections.append(f"<i>Spread{live_tag}</i>\n" + "\n".join(sp_lines))
 
     # A blank line between sections gives the odds room to breathe.
     # <blockquote> makes Telegram draw a vertical bar beside them, which
