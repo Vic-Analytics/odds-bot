@@ -39,8 +39,8 @@ SPORT_EMOJI = {
 }
 
 # Markets we ask for: "h2h" is moneyline, "spreads" is the point spread.
-# NOTE: the message layout only knows how to display these two. Adding
-# "totals" here would cost more credits AND needs a formatting change.
+# The message layout can display moneyline, spreads and totals. Adding a
+# market here costs 1 more credit per sport that has games that day.
 MARKETS = "h2h,spreads"
 
 # Sports that should use different markets than the default above.
@@ -60,9 +60,19 @@ MIN_BOOKMAKERS = {
 
 # Each odds request costs (number of markets) x (number of regions) credits.
 # We use 1 region ("us"), so the cost is just the number of markets.
+#
+# Soccer leagues use moneyline (with the draw) plus the over/under on total
+# goals, instead of a point spread. This costs the same as before.
+SOCCER_MARKETS = "h2h,totals"
+
+
 def markets_for(sport_name):
     """The markets string to request for a sport (its override, or the default)."""
-    return SPORT_MARKETS.get(sport_name, MARKETS)
+    if sport_name in SPORT_MARKETS:
+        return SPORT_MARKETS[sport_name]
+    if SPORTS.get(sport_name, "").startswith("soccer_"):
+        return SOCCER_MARKETS
+    return MARKETS
 
 # If your remaining monthly credits fall below this, the bot adds a warning
 # to your Telegram digest.

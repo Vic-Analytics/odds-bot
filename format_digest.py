@@ -73,6 +73,32 @@ def best_spreads(game):
     return best
 
 
+def best_totals(game):
+    """The over/under line: (point, over_price, over_book, under_price, under_book).
+
+    Different books use different lines (2.5 goals, 3.0, ...). We take the
+    most common line, then the best Over price and best Under price at it.
+    Returns None if there are no totals.
+    """
+    offers = _collect_offers(game, "totals")
+    over, under = offers.get("Over", []), offers.get("Under", [])
+    if not over or not under:
+        return None
+
+    counts = Counter(point for point, _, _ in over + under)
+    # Most common line (if tied, the lower one).
+    common_point = max(counts, key=lambda p: (counts[p], -p))
+
+    over_here = [(price, book) for point, price, book in over if point == common_point]
+    under_here = [(price, book) for point, price, book in under if point == common_point]
+    if not over_here or not under_here:
+        return None
+
+    over_price, over_book = max(over_here, key=lambda x: x[0])
+    under_price, under_book = max(under_here, key=lambda x: x[0])
+    return common_point, over_price, over_book, under_price, under_book
+
+
 def _format_game(game, is_soccer, is_fight=False, sport_name=""):
     """Build the text block for one game."""
     e = html.escape  # makes names like "Brighton & Hove" safe inside HTML
@@ -111,7 +137,8 @@ def _format_game(game, is_soccer, is_fight=False, sport_name=""):
 
     moneylines = best_moneylines(game)
     spreads = best_spreads(game)
-    if not moneylines and not spreads:
+    totals = best_totals(game)
+    if not moneylines and not spreads and not totals:
         return f"{headline}\n<i>Odds not available yet</i>"
 
     # Teams in the same order as the headline (with "Draw" in the middle for soccer).
@@ -141,6 +168,16 @@ def _format_game(game, is_soccer, is_fight=False, sport_name=""):
             )
     if sp_lines:
         sections.append(f"<i>Spread{live_tag}</i>\n" + "\n".join(sp_lines))
+
+    if totals:
+        point, over_price, over_book, under_price, under_book = totals
+        # Soccer totals are goals. The same layout would work for other sports.
+        label = "Total goals" if is_soccer else "Total"
+        sections.append(
+            f"<i>{label}{live_tag}</i>\n"
+            f"⬆️ Over {point:g}  <b>{int(over_price):+d}</b>  ({e(over_book)})\n"
+            f"⬇️ Under {point:g}  <b>{int(under_price):+d}</b>  ({e(under_book)})"
+        )
 
     # A blank line between sections gives the odds room to breathe.
     # <blockquote> makes Telegram draw a vertical bar beside them, which

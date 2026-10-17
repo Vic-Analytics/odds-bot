@@ -26,6 +26,7 @@ One message per sport, with the best moneyline and spread across all US sportsbo
 ## Features
 
 - **Best line across all books.** For each game it finds the highest moneyline price per team. For spreads it takes the most common point spread, then the best price at that number, so a rare odd alternate line can't look like a bargain.
+- **Totals for soccer.** Soccer leagues show the over/under on total goals instead of a point spread, using the same "most common line, then best price" logic.
 - **Today only, in Central time.** The API returns UTC. Start times are converted with a named time zone (`America/Chicago`), so daylight saving is handled automatically.
 - **14 leagues.** NFL, NBA, MLB, NHL, WNBA, UFC/MMA, EPL, Champions League, Europa League, La Liga, Serie A, Bundesliga, Ligue 1 and MLS. Soccer gets a Draw row, and fights get a moneyline-only layout. Adding a league is one line in `config.py`.
 - **Telegram-friendly output.** HTML formatting, one message per sport, and automatic splitting when a long slate would pass Telegram's 4096-character limit.
@@ -117,4 +118,4 @@ Everything you're likely to change is in `config.py`:
 
 - The API's MMA feed mixes UFC with other promotions and offers no promotion field. `MIN_BOOKMAKERS` trims low-coverage fights but can't isolate UFC perfectly.
 - GitHub may start scheduled runs a few minutes late, and on public repositories it pauses schedules after about 60 days without repository activity.
-- Totals (over/under) aren't supported yet. They would need a formatting change and cost more credits per sport.
+- Totals (over/under) are shown for soccer only. Adding them to other sports would cost 1 more credit per sport per day.
