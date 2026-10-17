@@ -48,8 +48,19 @@ NHL = {
     "Canucks": "🐳", "Golden Knights": "🛡️", "Capitals": "🦅", "Jets": "✈️",
 }
 
+MLB = {
+    "Diamondbacks": "🐍", "Braves": "🪓", "Athletics": "🐘", "Orioles": "🟠",
+    "Red Sox": "🧦", "Cubs": "🐻", "White Sox": "🖤", "Reds": "🔴",
+    "Guardians": "🛡️", "Rockies": "🏔️", "Tigers": "🐯", "Astros": "🌠",
+    "Royals": "👑", "Angels": "😇", "Dodgers": "💙", "Marlins": "🐟",
+    "Brewers": "🍺", "Twins": "👬", "Mets": "🍎", "Yankees": "🎩",
+    "Phillies": "🔔", "Pirates": "🏴‍☠️", "Padres": "🟤", "Giants": "🌉",
+    "Mariners": "🧭", "Cardinals": "🐦", "Rays": "☀️", "Rangers": "🤠",
+    "Blue Jays": "🍁", "Nationals": "🏛️",
+}
+
 # Which dictionary belongs to which league name in config.py's SPORTS.
-TEAM_EMOJI = {"NFL": NFL, "NBA": NBA, "NHL": NHL}
+TEAM_EMOJI = {"NFL": NFL, "NBA": NBA, "NHL": NHL, "MLB": MLB}
 
 
 def emoji_for(sport_name, team_name):
