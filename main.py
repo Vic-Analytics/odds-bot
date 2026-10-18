@@ -51,6 +51,21 @@ def deliver(message, dry_run):
     time.sleep(1)  # Telegram dislikes bursts; one message per second is safe
 
 
+def skip_reason(argv, now=None):
+    """Explain why this run should do nothing, or return None to go ahead.
+
+    With "--only-at-hour 8" we only run when it is really 8 AM Central.
+    (`now` is for the tests. Normally it is the current time.)
+    """
+    if "--only-at-hour" not in argv:
+        return None
+    wanted_hour = int(argv[argv.index("--only-at-hour") + 1])
+    current_hour = (now or datetime.now(CENTRAL)).astimezone(CENTRAL).hour
+    if current_hour != wanted_hour:
+        return f"It is {current_hour}:00 Central, not {wanted_hour}:00. Skipping this run."
+    return None
+
+
 def run(dry_run):
     """Do the whole digest. Returns 0 if all went well, 1 if anything failed."""
     errors = []
@@ -98,12 +113,10 @@ if __name__ == "__main__":
     # the workflow runs us twice a day (13:00 and 14:00 UTC) and passes
     # "--only-at-hour 8". We quietly do nothing unless it is really 8 AM in
     # Central time right now, so exactly one of the two runs sends the digest.
-    if "--only-at-hour" in sys.argv:
-        wanted_hour = int(sys.argv[sys.argv.index("--only-at-hour") + 1])
-        current_hour = datetime.now(CENTRAL).hour
-        if current_hour != wanted_hour:
-            print(f"It is {current_hour}:00 Central, not {wanted_hour}:00. Skipping this run.")
-            sys.exit(0)
+    reason = skip_reason(sys.argv)
+    if reason:
+        print(reason)
+        sys.exit(0)
 
     try:
         exit_code = run(dry_run)
