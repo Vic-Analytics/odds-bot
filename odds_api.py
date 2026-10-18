@@ -14,12 +14,12 @@ import os
 import sys
 from pathlib import Path
 
-import requests
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
 from config import MARKETS, SPORTS  # the settings live in config.py
+from http_utils import request_with_retries  # web requests that retry on hiccups
 
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
 
@@ -44,8 +44,8 @@ def fetch_events(sport_key):
         raise RuntimeError("ODDS_API_KEY is missing from .env")
 
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/events"
-    response = requests.get(
-        url, params={"apiKey": ODDS_API_KEY, "dateFormat": "iso"}, timeout=20
+    response = request_with_retries(
+        "GET", url, params={"apiKey": ODDS_API_KEY, "dateFormat": "iso"}, timeout=20
     )
     _raise_if_api_error(response)
     return response.json()
@@ -63,8 +63,8 @@ def fetch_scores(sport_key):
         raise RuntimeError("ODDS_API_KEY is missing from .env")
 
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/scores"
-    response = requests.get(
-        url, params={"apiKey": ODDS_API_KEY, "dateFormat": "iso"}, timeout=20
+    response = request_with_retries(
+        "GET", url, params={"apiKey": ODDS_API_KEY, "dateFormat": "iso"}, timeout=20
     )
     _raise_if_api_error(response)
     return response.json(), response.headers.get("x-requests-remaining")
@@ -94,7 +94,7 @@ def fetch_odds(sport_key, markets=MARKETS):
         "dateFormat": "iso",         # times like 2026-10-16T23:00:00Z (UTC)
     }
 
-    response = requests.get(url, params=params, timeout=20)
+    response = request_with_retries("GET", url, params=params, timeout=20)
 
     _raise_if_api_error(response)
 

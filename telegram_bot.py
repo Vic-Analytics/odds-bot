@@ -10,8 +10,9 @@ file directly to send yourself a test message:
 import os
 from pathlib import Path
 
-import requests
 from dotenv import load_dotenv
+
+from http_utils import request_with_retries
 
 # Read the secrets from .env (on GitHub Actions there is no .env file, and the
 # values come from GitHub Secrets instead - load_dotenv just does nothing then).
@@ -42,7 +43,9 @@ def send_message(text):
     }
 
     # POST = "send data to a server". timeout stops us waiting forever.
-    response = requests.post(url, json=payload, timeout=15)
+    # retry_429=True: if Telegram says "slow down", wait as long as it asks
+    # and try again.
+    response = request_with_retries("POST", url, json=payload, timeout=15, retry_429=True)
 
     # Telegram explains errors in the response body, so show that if we fail.
     if not response.ok:
