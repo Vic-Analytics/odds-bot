@@ -1,5 +1,7 @@
 # Daily Sports Odds Digest (Telegram Bot)
 
+[![Tests](https://github.com/Vic-Analytics/odds-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/Vic-Analytics/odds-bot/actions/workflows/tests.yml)
+
 A Python bot that sends a formatted digest of **today's games and best available betting lines** to Telegram every morning at 8 AM Central. It runs in the cloud on GitHub Actions, so no computer needs to stay on.
 
 > For information only. This project does not place bets or give betting advice.
@@ -50,6 +52,8 @@ Soccer swaps the spread for the over/under on goals, and clubs get kit-color dot
 - **Team emoji.** NFL, NBA, NHL, MLB and WNBA teams get an emoji matched by nickname, so "LA Clippers" and "Los Angeles Clippers" both work. Soccer clubs get kit-color dots. UFC fighters get a country flag from a hand-kept list, because the API doesn't provide nationality.
 - **Telegram-friendly output.** HTML formatting, one message per sport, and automatic splitting when a long slate would pass Telegram's 4096-character limit.
 - **Failure alerts.** If a sport fails, the others still send, and a short error message arrives on Telegram. The run also exits with an error code, so GitHub marks it failed.
+- **Retries.** Timeouts, dropped connections and temporary server errors are retried up to 3 times. Client errors (a bad key) and exhausted API credits are not, because trying again can't help.
+- **Tested.** About 90 automated tests run on every push (see below).
 - **Secrets stay secret.** Keys live in `.env` locally and in GitHub Secrets in the cloud. Error text is scrubbed of keys and tokens before it is shown anywhere, because Python network errors can include the full request URL.
 
 ## Built to stay inside a free API tier
@@ -105,8 +109,11 @@ GitHub's cron runs on UTC, which doesn't follow daylight saving. The workflow sc
 | `ufc_flags.py` | Country flags for UFC fighters (hand-kept list) |
 | `check_emoji.py` | Free tool: lists teams in the schedule that have no emoji yet |
 | `telegram_bot.py` | Sends messages to Telegram |
+| `http_utils.py` | Web requests that retry on temporary failures |
 | `get_chat_id.py` | One-time helper to find your Telegram chat ID |
+| `tests/` | Automated tests (fake data only, no network) |
 | `.github/workflows/daily-odds.yml` | The schedule and cloud job |
+| `.github/workflows/tests.yml` | Runs the tests on every push and pull request |
 
 ## Run it locally
 
@@ -128,6 +135,26 @@ python check_emoji.py            # free: which teams have no emoji yet
 python main.py --dry-run         # prints the digest (uses API credits)
 python main.py                   # sends the digest to Telegram
 ```
+
+## Tests
+
+```powershell
+pip install -r requirements-dev.txt
+pytest
+```
+
+The tests use small fake games, so they make no API calls, spend no credits and need no secrets. They cover:
+
+- the best-line logic for moneylines, spreads and totals, including tie-breaks and outlier books
+- Central-time conversion and the "starts today" window, including the days daylight saving starts and ends
+- message layout: live games, the soccer Draw row and total goals, MMA, HTML escaping, and splitting long slates under Telegram's limit
+- team emoji, soccer kit colors and UFC flags (matching rules, no duplicates within a league, every league complete)
+- the safety rails: secret scrubbing, the 8 AM guard in both daylight-saving seasons, the credit guard, retries, and how one failing sport is reported
+- the full `main.run()` flow with Telegram and the API replaced by fakes
+
+I also checked that the tests are able to fail: breaking the code on purpose in a throwaway copy (for example flipping the 8 AM check or turning off secret scrubbing) made them fail every time.
+
+GitHub runs the same tests on every push using `.github/workflows/tests.yml`. The daily digest job does not install the test tools.
 
 ## Deploy on GitHub Actions
 

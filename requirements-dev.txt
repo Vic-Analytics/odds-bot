@@ -1,0 +1,4 @@
+# Everything the daily bot needs, plus the tools used to test it.
+# (The daily 8 AM job installs only requirements.txt, so it stays fast.)
+-r requirements.txt
+pytest

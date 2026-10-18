@@ -10,3 +10,6 @@ raw_odds.json
 # Python's compiled cache files
 __pycache__/
 *.pyc
+
+# pytest's cache
+.pytest_cache/

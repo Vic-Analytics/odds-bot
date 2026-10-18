@@ -30,14 +30,21 @@ def start_time_central(game):
     return datetime.fromisoformat(game["commence_time"]).astimezone(CENTRAL)
 
 
-def has_started(game):
-    """True if the game's start time has already passed (it's live, or over)."""
-    return datetime.fromisoformat(game["commence_time"]) <= datetime.now(timezone.utc)
+def has_started(game, now=None):
+    """True if the game's start time has already passed (it's live, or over).
+
+    (`now` is for the tests. Normally it is the current time.)
+    """
+    now = now or datetime.now(timezone.utc)
+    return datetime.fromisoformat(game["commence_time"]) <= now
 
 
-def filter_today(games):
-    """Return only the games that start today (Central), earliest first."""
-    now = datetime.now(CENTRAL)
+def filter_today(games, now=None):
+    """Return only the games that start today (Central), earliest first.
+
+    (`now` is for the tests. Normally it is the current time.)
+    """
+    now = (now or datetime.now(CENTRAL)).astimezone(CENTRAL)
     start_of_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
     start_of_tomorrow = start_of_today + timedelta(days=1)
 

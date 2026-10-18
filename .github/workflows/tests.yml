@@ -1,0 +1,33 @@
+# Runs the automated tests whenever code is pushed or a pull request is opened.
+# This is separate from the daily digest (daily-odds.yml), which is untouched.
+# The tests use fake data only: no API calls, no credits, no secrets needed.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      # requirements-dev.txt = requirements.txt + pytest
+      - run: pip install -r requirements-dev.txt
+
+      # pytest.ini tells it where the tests are.
+      - run: pytest
