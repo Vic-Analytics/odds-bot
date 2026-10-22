@@ -75,13 +75,28 @@ def test_label_for_unmapped_league_is_just_the_name():
     assert team_label("Boxing", "Anyone") == "Anyone"
 
 
-def test_draw_never_gets_an_emoji():
-    assert team_label("EPL", "Draw") == "Draw"
+def test_soccer_draw_gets_two_handshakes_so_it_lines_up_with_the_clubs():
+    assert team_label("EPL", "Draw") == "\U0001F91D\U0001F91D Draw"
 
 
-def test_soccer_label_uses_kit_colors_and_falls_back_to_a_ball():
-    assert team_label("EPL", "Liverpool") == "\U0001F534 Liverpool"
-    assert team_label("EPL", "Totally Unknown FC") == "⚽ Totally Unknown FC"
+def test_draw_outside_soccer_stays_plain():
+    assert team_label("NFL", "Draw") == "Draw"
+
+
+def test_soccer_label_uses_kit_colors():
+    assert team_label("EPL", "Arsenal") == "\U0001F534⚪ Arsenal"          # two-color kit
+
+
+def test_one_color_kits_show_the_dot_twice_and_unknown_clubs_two_balls():
+    assert team_label("EPL", "Liverpool") == "\U0001F534\U0001F534 Liverpool"
+    assert team_label("EPL", "Totally Unknown FC") == "⚽⚽ Totally Unknown FC"
+
+
+def test_every_soccer_label_starts_with_exactly_two_emoji():
+    names = ["Arsenal", "Liverpool", "Chelsea", "Real Madrid", "Draw", "Totally Unknown FC", "Inter Miami CF"]
+    for name in names:
+        prefix = team_label("EPL", name).split(" ", 1)[0]
+        assert len(prefix) == 2, f"{name!r} -> {prefix!r}"
 
 
 def test_mma_label_uses_flag_or_nothing():
