@@ -77,6 +77,39 @@ def test_draw_row_sits_between_the_two_teams():
     assert message.index("Everton  ") < message.index("Draw") < message.index("Chelsea  ")
 
 
+def totals_game(home, away):
+    return game(home, away, start=FUTURE, books=[
+        book("BetRivers",
+             h2h=[outcome(home, -120), outcome(away, 100)],
+             totals=[outcome("Over", -112, 6.5), outcome("Under", -103, 6.5)]),
+    ])
+
+
+def test_each_sport_names_its_total_correctly():
+    cases = [("NHL", "Total goals"), ("MLB", "Total runs"), ("EPL", "Total goals"), ("NBA", "Total")]
+    for sport, label in cases:
+        [message] = format_sport_messages(sport, [totals_game("Home Team", "Away Team")])
+        assert f"<i>{label}</i>" in message, sport
+
+
+def test_hockey_and_baseball_show_over_under_instead_of_a_spread():
+    for sport, home, away in [("NHL", "Colorado Avalanche", "Pittsburgh Penguins"),
+                              ("MLB", "Milwaukee Brewers", "Tampa Bay Rays")]:
+        [message] = format_sport_messages(sport, [totals_game(home, away)])
+        assert "Over 6.5  <b>-112</b>  (BetRivers)" in message
+        assert "Under 6.5  <b>-103</b>  (BetRivers)" in message
+        assert "Spread" not in message
+        # The home team's moneyline row (its last mention) comes before the total.
+        assert message.index("Moneyline") < message.rindex(home) < message.index("Total")
+
+
+def test_a_whole_number_total_prints_without_a_decimal():
+    g = game("H", "A", start=FUTURE, books=[
+        book("X", totals=[outcome("Over", 105, 6.0), outcome("Under", -125, 6.0)])])
+    [message] = format_sport_messages("NHL", [g])
+    assert "Over 6  " in message and "Under 6  " in message
+
+
 def test_soccer_moneyline_rows_all_start_with_the_same_emoji_width():
     # Everton and Chelsea are both one-color kits; Brighton has a two-color kit.
     for home, away in [("Everton", "Chelsea"), ("Brighton and Hove Albion", "Everton")]:
