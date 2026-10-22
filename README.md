@@ -32,7 +32,7 @@ Soccer swaps the spread for the over/under on goals, and clubs get kit-color dot
 🔴 LIVE · Bournemouth 1–0 Sunderland
 ┃ Moneyline (live odds)
 ┃ 🔴⚫ Bournemouth  -150  (FanDuel)
-┃ Draw  +340  (Bovada)
+┃ 🤝🤝 Draw  +340  (Bovada)
 ┃ 🔴⚪ Sunderland  +500  (Bovada)
 ┃
 ┃ Total goals (live odds)
@@ -49,7 +49,7 @@ Soccer swaps the spread for the over/under on goals, and clubs get kit-color dot
 - **14 leagues.** NFL, NBA, MLB, NHL, WNBA, UFC/MMA, EPL, Champions League, Europa League, La Liga, Serie A, Bundesliga, Ligue 1 and MLS. Adding a league is one line in `config.py`.
 - **Market per sport.** US leagues show moneyline and spread. Soccer shows moneyline (with the draw) and total goals. MMA shows moneyline only.
 - **Live game awareness.** A game that has already started when the digest runs is marked 🔴 LIVE with its current score, and its odds are labeled as live.
-- **Team emoji.** NFL, NBA, NHL, MLB and WNBA teams get an emoji matched by nickname, so "LA Clippers" and "Los Angeles Clippers" both work. Soccer clubs get kit-color dots. UFC fighters get a country flag from a hand-kept list, because the API doesn't provide nationality.
+- **Team emoji.** NFL, NBA, NHL, MLB and WNBA teams get an emoji matched by nickname, so "LA Clippers" and "Los Angeles Clippers" both work. Soccer clubs get two kit-color dots (a one-color kit shows its dot twice, and the Draw row gets 🤝🤝) so every row lines up. UFC fighters get a country flag from a hand-kept list, because the API doesn't provide nationality.
 - **Telegram-friendly output.** HTML formatting, one message per sport, and automatic splitting when a long slate would pass Telegram's 4096-character limit.
 - **Failure alerts.** If a sport fails, the others still send, and a short error message arrives on Telegram. The run also exits with an error code, so GitHub marks it failed.
 - **Retries.** Timeouts, dropped connections and temporary server errors are retried up to 3 times. Client errors (a bad key) and exhausted API credits are not, because trying again can't help.

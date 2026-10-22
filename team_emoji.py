@@ -89,14 +89,22 @@ def emoji_for(sport_name, team_name):
 
 def team_label(sport_name, team_name):
     """The team name with its emoji in front, e.g. '🐂 Houston Texans'."""
-    # "Draw" is a result, not a team, so it never gets an emoji.
+    is_soccer = SPORTS.get(sport_name, "").startswith("soccer_")
+
+    # In soccer, every row gets exactly two emoji so the names line up:
+    # clubs show two kit-color dots, and the Draw row gets two handshakes.
+    # (Telegram text isn't monospaced, so matching the emoji width is what
+    # keeps the team names and the Draw label in a straight column.)
     if team_name == "Draw":
-        return team_name
+        return "\U0001F91D\U0001F91D Draw" if is_soccer else team_name
 
     # Soccer clubs get kit-color dots from soccer_emoji.py (a club it doesn't
     # know shows a plain soccer ball and is reported in the run log).
-    if SPORTS.get(sport_name, "").startswith("soccer_"):
-        return f"{soccer_emoji(team_name)} {team_name}"
+    if is_soccer:
+        dots = soccer_emoji(team_name)
+        if len(dots) == 1:        # a one-color kit: show the dot twice
+            dots = dots * 2
+        return f"{dots} {team_name}"
 
     # Fighters get a country flag from ufc_flags.py, if they're on that list.
     if SPORTS.get(sport_name, "").startswith("mma_"):

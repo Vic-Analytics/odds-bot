@@ -77,6 +77,15 @@ def test_draw_row_sits_between_the_two_teams():
     assert message.index("Everton  ") < message.index("Draw") < message.index("Chelsea  ")
 
 
+def test_soccer_moneyline_rows_all_start_with_the_same_emoji_width():
+    # Everton and Chelsea are both one-color kits; Brighton has a two-color kit.
+    for home, away in [("Everton", "Chelsea"), ("Brighton and Hove Albion", "Everton")]:
+        [message] = format_sport_messages("EPL", [soccer_game(home=home, away=away)])
+        lines = message.split("<i>Moneyline</i>\n")[1].split("\n\n")[0].split("\n")
+        assert len(lines) == 3                                   # home, draw, away
+        assert [len(line.split(" ", 1)[0]) for line in lines] == [2, 2, 2]
+
+
 def test_team_names_are_html_escaped():
     [message] = format_sport_messages("EPL", [soccer_game(home="Brighton & Hove Albion")])
     assert "Brighton &amp; Hove Albion" in message
