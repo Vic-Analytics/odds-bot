@@ -5,19 +5,17 @@ For each game we show the BEST available line across all sportsbooks:
   - Moneyline: the highest price for each team (+150 beats +130, -105 beats -110)
   - Spread:    the most common point spread, then the best price at that spread
 
-Test it for FREE (no credits) using the raw_odds.json file saved in Step 3:
+Preview the layout with built-in sample games (no API call, no credits):
 
     python format_digest.py          prints a preview in the terminal
     python format_digest.py send     also sends the preview to Telegram
 """
 
 import html
-import json
 import re
 import sys
 from collections import Counter
 from datetime import datetime
-from pathlib import Path
 
 from config import SPORT_EMOJI, SPORTS, total_label
 from games_today import CENTRAL, has_started, start_time_central
@@ -222,17 +220,50 @@ def plain_preview(message):
     return html.unescape(re.sub(r"<[^>]+>", "", message))
 
 
+def _sample_games():
+    """Made-up games and odds, so the layout can be previewed without the API."""
+    def line(name, price, point=None):
+        outcome = {"name": name, "price": price}
+        if point is not None:
+            outcome["point"] = point
+        return outcome
+
+    def book(title, *markets):
+        return {"title": title, "markets": [{"key": k, "outcomes": o} for k, o in markets]}
+
+    # Dates far in the future, so these never show up as "LIVE".
+    hockey = {
+        "id": "sample-nhl", "home_team": "Colorado Avalanche", "away_team": "Pittsburgh Penguins",
+        "commence_time": "2099-01-02T02:10:00Z",
+        "bookmakers": [
+            book("DraftKings",
+                 ("h2h", [line("Pittsburgh Penguins", 150), line("Colorado Avalanche", -175)]),
+                 ("totals", [line("Over", -115, 6.5), line("Under", -105, 6.5)])),
+            book("FanDuel",
+                 ("h2h", [line("Pittsburgh Penguins", 145), line("Colorado Avalanche", -170)]),
+                 ("totals", [line("Over", -112, 6.5), line("Under", -108, 6.5)])),
+        ],
+    }
+    soccer = {
+        "id": "sample-epl", "home_team": "Everton", "away_team": "Chelsea",
+        "commence_time": "2099-01-02T14:00:00Z",
+        "bookmakers": [
+            book("Bovada",
+                 ("h2h", [line("Everton", 310), line("Draw", 270), line("Chelsea", -115)]),
+                 ("totals", [line("Over", -112, 2.5), line("Under", -108, 2.5)])),
+            book("BetRivers",
+                 ("h2h", [line("Everton", 300), line("Draw", 280), line("Chelsea", -120)]),
+                 ("totals", [line("Over", -114, 2.5), line("Under", -112, 2.5)])),
+        ],
+    }
+    return {"NHL": [hockey], "EPL": [soccer]}
+
+
 # Runs only when you start this file directly, not when imported.
 if __name__ == "__main__":
-    # Use the raw NFL data saved in Step 3. No API call, no credits.
-    raw_file = Path(__file__).with_name("raw_odds.json")
-    if not raw_file.exists():
-        raise SystemExit("raw_odds.json not found. Run: python odds_api.py NFL")
-
-    # (These upcoming games aren't necessarily today's, which is fine for a
-    # formatting test. We just show the first 3.)
-    sample_games = json.loads(raw_file.read_text(encoding="utf-8"))[:3]
-    messages = format_sport_messages("NFL", sample_games)
+    messages = []
+    for sport_name, games in _sample_games().items():
+        messages += format_sport_messages(sport_name, games)
 
     for message in messages:
         print(plain_preview(message))
