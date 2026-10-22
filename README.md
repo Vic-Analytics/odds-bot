@@ -46,7 +46,7 @@ Soccer swaps the spread for the over/under on goals, and clubs get kit-color dot
 
 - **Best line across all books.** For each game it finds the highest moneyline price per team. For spreads and totals it takes the most common line, then the best price at that number, so a rare odd alternate line can't look like a bargain.
 - **Today only, in Central time.** The API returns UTC. Start times are converted with a named time zone (`America/Chicago`), so daylight saving is handled automatically.
-- **14 leagues.** NFL, NBA, MLB, NHL, WNBA, UFC/MMA, EPL, Champions League, Europa League, La Liga, Serie A, Bundesliga, Ligue 1 and MLS. Adding a league is one line in `config.py`.
+- **15 leagues.** NFL, NBA, MLB, NHL, WNBA, UFC/MMA, EPL, Champions League, Europa League, Conference League, La Liga, Serie A, Bundesliga, Ligue 1 and MLS. Adding a league is one line in `config.py`.
 - **Market per sport.** US leagues show moneyline and spread. Soccer shows moneyline (with the draw) and total goals. MMA shows moneyline only.
 - **Live game awareness.** A game that has already started when the digest runs is marked 🔴 LIVE with its current score, and its odds are labeled as live.
 - **Team emoji.** NFL, NBA, NHL, MLB and WNBA teams get an emoji matched by nickname, so "LA Clippers" and "Los Angeles Clippers" both work. Soccer clubs get two kit-color dots (a one-color kit shows its dot twice, and the Draw row gets 🤝🤝) so every row lines up. UFC fighters get a country flag from a hand-kept list, because the API doesn't provide nationality.
@@ -66,7 +66,7 @@ The Odds API's free tier gives 500 credits a month, and each market in each requ
 4. If a game has already started, it spends 1 extra credit on that sport to fetch the live score. This only happens when a game is underway at digest time.
 5. It reads the remaining quota from the response headers. It warns you when credits run low and refuses a call it can't afford.
 
-A busy month with all 14 leagues comes to roughly 300 credits by my estimate.
+A busy month with all 15 leagues comes to roughly 315 credits by my estimate.
 
 ## How it works
 

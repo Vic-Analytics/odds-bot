@@ -22,6 +22,7 @@ SPORTS = {
     "EPL": "soccer_epl",                          # English Premier League
     "Champions League": "soccer_uefa_champs_league",
     "Europa League": "soccer_uefa_europa_league",
+    "Conference League": "soccer_uefa_europa_conference_league",
     "La Liga": "soccer_spain_la_liga",
     "Serie A": "soccer_italy_serie_a",
     "Bundesliga": "soccer_germany_bundesliga",
@@ -34,6 +35,7 @@ SPORT_EMOJI = {
     "NFL": "\U0001F3C8", "NBA": "\U0001F3C0", "MLB": "⚾", "NHL": "\U0001F3D2",
     "WNBA": "\U0001F3C0", "UFC / MMA": "\U0001F94A",
     "EPL": "⚽", "Champions League": "⚽", "Europa League": "⚽",
+    "Conference League": "⚽",
     "La Liga": "⚽", "Serie A": "⚽", "Bundesliga": "⚽",
     "Ligue 1": "⚽", "MLS": "⚽",
 }
