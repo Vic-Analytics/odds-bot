@@ -187,3 +187,7 @@ Emoji are matched by team name, so most things need no changes. A few events nee
 - Kit colors can clash (two red teams in one game), and some newer emoji may not render on older phones.
 - GitHub may start scheduled runs a few minutes late, and on public repositories it pauses schedules after about 60 days without repository activity.
 - Each sport shows spread or total, not both. Showing both for a sport would cost 1 more credit per sport per day.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
