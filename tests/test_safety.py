@@ -63,8 +63,12 @@ def test_exactly_one_of_the_two_daily_runs_sends(year, month, day):
 # ---------- markets per sport ----------
 
 def test_markets_per_sport():
-    assert markets_for("NFL") == "h2h,spreads"
-    assert markets_for("NHL") == "h2h,spreads"
+    # Point spreads for football and basketball...
+    for name in ("NFL", "NBA", "WNBA"):
+        assert markets_for(name) == "h2h,spreads", name
+    # ...totals for baseball and hockey, moneyline only for fights.
+    assert markets_for("MLB") == "h2h,totals"
+    assert markets_for("NHL") == "h2h,totals"
     assert markets_for("UFC / MMA") == "h2h"
     for name, key in SPORTS.items():
         if key.startswith("soccer_"):

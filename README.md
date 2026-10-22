@@ -18,12 +18,12 @@ One message per sport. Each game shows the best line across US sportsbooks and t
 ┃ 🐧 Pittsburgh Penguins  +150  (DraftKings)
 ┃ 🏔️ Colorado Avalanche  -170  (FanDuel)
 ┃
-┃ Spread
-┃ 🐧 Pittsburgh Penguins  +1.5  (-130, BetMGM)
-┃ 🏔️ Colorado Avalanche  -1.5  (+110, Caesars)
+┃ Total goals
+┃ ⬆️ Over 6.5  -112  (BetRivers)
+┃ ⬇️ Under 6.5  -103  (BetOnline.ag)
 ```
 
-Soccer swaps the spread for the over/under on goals, and clubs get kit-color dots:
+Soccer also shows the over/under on goals, and clubs get kit-color dots:
 
 ```
 ⚽ EPL — Sat, Oct 17
@@ -47,7 +47,7 @@ Soccer swaps the spread for the over/under on goals, and clubs get kit-color dot
 - **Best line across all books.** For each game it finds the highest moneyline price per team. For spreads and totals it takes the most common line, then the best price at that number, so a rare odd alternate line can't look like a bargain.
 - **Today only, in Central time.** The API returns UTC. Start times are converted with a named time zone (`America/Chicago`), so daylight saving is handled automatically.
 - **15 leagues.** NFL, NBA, MLB, NHL, WNBA, UFC/MMA, EPL, Champions League, Europa League, Conference League, La Liga, Serie A, Bundesliga, Ligue 1 and MLS. Adding a league is one line in `config.py`.
-- **Market per sport.** US leagues show moneyline and spread. Soccer shows moneyline (with the draw) and total goals. MMA shows moneyline only.
+- **Market per sport.** The NFL, NBA and WNBA show moneyline and point spread. MLB and the NHL show moneyline and total runs/goals. Soccer shows moneyline (with the draw) and total goals. MMA shows moneyline only.
 - **Live game awareness.** A game that has already started when the digest runs is marked 🔴 LIVE with its current score, and its odds are labeled as live.
 - **Team emoji.** NFL, NBA, NHL, MLB and WNBA teams get an emoji matched by nickname, so "LA Clippers" and "Los Angeles Clippers" both work. Soccer clubs get two kit-color dots (a one-color kit shows its dot twice, and the Draw row gets 🤝🤝) so every row lines up. UFC fighters get a country flag from a hand-kept list, because the API doesn't provide nationality.
 - **Telegram-friendly output.** HTML formatting, one message per sport, and automatic splitting when a long slate would pass Telegram's 4096-character limit.
@@ -167,7 +167,7 @@ GitHub runs the same tests on every push using `.github/workflows/tests.yml`. Th
 Everything you're likely to change is in `config.py`:
 
 - `SPORTS` adds or removes leagues. Find sport keys at `https://api.the-odds-api.com/v4/sports?apiKey=YOUR_KEY`.
-- `MARKETS`, `SOCCER_MARKETS` and `SPORT_MARKETS` set which markets each sport requests.
+- `MARKETS`, `SOCCER_MARKETS` and `SPORT_MARKETS` set which markets each sport requests, and `TOTAL_LABELS` names the over/under section ("Total goals", "Total runs").
 - `MIN_BOOKMAKERS` hides fights that few sportsbooks offer (used for MMA).
 - `LOW_CREDITS_WARNING` sets when the bot warns you about your remaining quota.
 
@@ -186,4 +186,4 @@ Emoji are matched by team name, so most things need no changes. A few events nee
 - A live score is a snapshot taken when the digest runs. The Telegram message does not update itself.
 - Kit colors can clash (two red teams in one game), and some newer emoji may not render on older phones.
 - GitHub may start scheduled runs a few minutes late, and on public repositories it pauses schedules after about 60 days without repository activity.
-- Totals (over/under) are shown for soccer only. Adding them to other sports would cost 1 more credit per sport per day.
+- Each sport shows spread or total, not both. Showing both for a sport would cost 1 more credit per sport per day.

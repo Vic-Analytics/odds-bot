@@ -19,7 +19,7 @@ from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from config import SPORT_EMOJI, SPORTS
+from config import SPORT_EMOJI, SPORTS, total_label
 from games_today import CENTRAL, has_started, start_time_central
 from team_emoji import team_label
 
@@ -171,8 +171,7 @@ def _format_game(game, is_soccer, is_fight=False, sport_name=""):
 
     if totals:
         point, over_price, over_book, under_price, under_book = totals
-        # Soccer totals are goals. The same layout would work for other sports.
-        label = "Total goals" if is_soccer else "Total"
+        label = total_label(sport_name)   # "Total goals", "Total runs", ...
         sections.append(
             f"<i>{label}{live_tag}</i>\n"
             f"⬆️ Over {point:g}  <b>{int(over_price):+d}</b>  ({e(over_book)})\n"

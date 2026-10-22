@@ -47,8 +47,21 @@ MARKETS = "h2h,spreads"
 
 # Sports that should use different markets than the default above.
 # MMA has no point spread, so asking for it would waste a credit every time.
+#
+# MLB and NHL show the over/under on total runs/goals instead of a spread: in
+# low-scoring sports the totals are the more popular bet. (The NFL, NBA and
+# WNBA keep the point spread.)
 SPORT_MARKETS = {
     "UFC / MMA": "h2h",
+    "MLB": "h2h,totals",
+    "NHL": "h2h,totals",
+}
+
+# What to call the over/under section. Soccer leagues default to "Total goals"
+# and anything not listed here is just "Total".
+TOTAL_LABELS = {
+    "MLB": "Total runs",
+    "NHL": "Total goals",
 }
 
 # The MMA feed mixes UFC with small shows and far-off rumored fights, and the
@@ -66,6 +79,15 @@ MIN_BOOKMAKERS = {
 # Soccer leagues use moneyline (with the draw) plus the over/under on total
 # goals, instead of a point spread. This costs the same as before.
 SOCCER_MARKETS = "h2h,totals"
+
+
+def total_label(sport_name):
+    """The heading for the over/under section of a sport."""
+    if sport_name in TOTAL_LABELS:
+        return TOTAL_LABELS[sport_name]
+    if SPORTS.get(sport_name, "").startswith("soccer_"):
+        return "Total goals"
+    return "Total"
 
 
 def markets_for(sport_name):
