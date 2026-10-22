@@ -204,6 +204,21 @@ SOCCER_ALIASES = {
     "Vancouver Whitecaps": "Vancouver Whitecaps FC",
 }
 
+# ---- Conference League clubs (added later, from general knowledge: check any
+# you care about). Left out because the colors weren't certain: FC Iberia 1999,
+# Inter Club d'Escaldes, KF Egnatia, Pafos FC, Riga FC.
+SOCCER_EMOJI.update({
+    "AGF Aarhus": "⚪🔵", "Ajax": "⚪🔴", "FC Copenhagen": "⚪🔵",
+    "FC Kairat": "🟡⚫", "FC Lugano": "⚪⚫", "FC Midtjylland": "⚫🔴",
+    "FC Nordsjaelland": "🟡⚫", "FC Thun": "🔴⚪", "FC Twente Enschede": "🔴⚪",
+    "FK Borac Banja Luka": "🔴🔵", "FK Jablonec": "🟢⚪", "FK Kauno Žalgiris": "🟢⚪",
+    "Gent": "🔵⚪", "Hajduk Split": "⚪🔵", "Hearts": "🟤⚪",
+    "KuPS Kuopio": "🟡⚫", "Lincoln Red Imps FC": "🔴⚪", "Mjällby AIF": "🟡⚫",
+    "PFC CSKA Sofia": "🔴⚪", "Panathinaikos FC": "🟢⚪", "Red Star Belgrade": "🔴⚪",
+    "SC Braga": "🔴⚪", "SK Brann": "🔴⚪", "Sint Truiden": "🟡🔵",
+    "Trabzonspor": "🟤🔵", "Universitatea Craiova": "🔵⚪",
+})
+
 # Spellings The Odds API actually uses that differ from the names above.
 SOCCER_ALIASES.update({
     "CA Osasuna": "Osasuna",
