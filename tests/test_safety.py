@@ -1,7 +1,5 @@
 """Tests for the safety rails: secret scrubbing, the 8 AM guard, credits, errors."""
 
-from datetime import datetime, timezone
-
 import pytest
 
 import games_today
@@ -29,35 +27,6 @@ def test_scrub_copes_with_missing_secrets(monkeypatch):
     monkeypatch.setattr(main, "ODDS_API_KEY", None)
     monkeypatch.setattr(telegram_bot, "BOT_TOKEN", None)
     assert main.scrub("nothing to hide") == "nothing to hide"
-
-
-# ---------- the 8 AM Central guard ----------
-
-def utc(year, month, day, hour):
-    return datetime(year, month, day, hour, tzinfo=timezone.utc)
-
-
-def test_no_flag_means_always_run():
-    assert main.skip_reason(["main.py"], now=utc(2026, 7, 15, 3)) is None
-
-
-def test_runs_at_8_central_and_skips_other_hours():
-    args = ["main.py", "--only-at-hour", "8"]
-    assert main.skip_reason(args, now=utc(2026, 7, 15, 13)) is None            # 8 AM CDT
-    assert "Skipping" in main.skip_reason(args, now=utc(2026, 7, 15, 12))      # 7 AM CDT
-
-
-@pytest.mark.parametrize("year, month, day", [(2026, 7, 15), (2026, 1, 15), (2026, 11, 1), (2026, 3, 8)])
-def test_exactly_one_of_the_two_daily_runs_sends(year, month, day):
-    """The workflow fires at 13:00 and 14:00 UTC. Whatever the season, one sends."""
-    args = ["main.py", "--only-at-hour", "8"]
-    sends = [skip is None for skip in (
-        main.skip_reason(args, now=utc(year, month, day, 13)),
-        main.skip_reason(args, now=utc(year, month, day, 14)),
-    )]
-    # Edge days: the clock change happens at 2 AM, so 13:00/14:00 UTC are already
-    # in the new offset on both Nov 1 and Mar 8.
-    assert sends.count(True) == 1
 
 
 # ---------- markets per sport ----------
@@ -255,3 +224,57 @@ def test_dry_run_sends_nothing(harness, capsys):
     assert main.run(True) == 0
     assert sent == []
     assert "NHL" in capsys.readouterr().out
+
+
+# ---------- the "digest sent today" marker ----------
+
+def test_marker_is_written_after_a_normal_digest(harness, tmp_path):
+    sent, script = harness
+    marker = tmp_path / "sent.marker"
+    script({SPORTS["NHL"]: ([a_game()], "300")})
+    assert main.run(False, str(marker)) == 0
+    assert marker.exists()
+
+
+def test_marker_is_written_on_a_quiet_day_too(harness, tmp_path):
+    # "No games today" is a delivered message, so later runs must not repeat it.
+    sent, script = harness
+    marker = tmp_path / "sent.marker"
+    script({})
+    main.run(False, str(marker))
+    assert sent == ["No games today in your sports."]
+    assert marker.exists()
+
+
+def test_marker_is_written_when_some_sports_fail_but_others_were_delivered(harness, tmp_path):
+    sent, script = harness
+    marker = tmp_path / "sent.marker"
+    script({SPORTS["NBA"]: RuntimeError("boom"), SPORTS["NHL"]: ([a_game()], "300")})
+    assert main.run(False, str(marker)) == 1          # the run is still flagged as a problem
+    assert marker.exists()                            # ...but today's digest did go out
+
+
+def test_no_marker_when_every_sport_failed_so_the_next_hour_retries(harness, tmp_path):
+    sent, script = harness
+    marker = tmp_path / "sent.marker"
+    everything_fails = {key: RuntimeError("API down") for key in SPORTS.values()}
+    script(everything_fails)
+    assert main.run(False, str(marker)) == 1
+    assert not marker.exists()
+    assert any("Odds bot problem" in m for m in sent)   # you are still told about it
+
+
+def test_no_marker_in_a_dry_run(harness, tmp_path):
+    sent, script = harness
+    marker = tmp_path / "sent.marker"
+    script({SPORTS["NHL"]: ([a_game()], "300")})
+    main.run(True, str(marker))
+    assert not marker.exists()
+
+
+def test_no_marker_path_means_no_file_is_written(harness, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    sent, script = harness
+    script({SPORTS["NHL"]: ([a_game()], "300")})
+    main.run(False)
+    assert list(tmp_path.iterdir()) == []

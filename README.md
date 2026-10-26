@@ -71,10 +71,13 @@ A busy month with all 15 leagues comes to roughly 315 credits by my estimate.
 ## How it works
 
 ```
-GitHub Actions (cron: 13:00 and 14:00 UTC)
+GitHub Actions (cron: every hour, 13:00-20:00 UTC)
         │
         ▼
-   main.py  ── skips unless it is really 8 AM Central (daylight saving guard)
+   gate.py  ── inside the 8 AM-2 PM Central window? already sent today? (else stop)
+        │
+        ▼
+   main.py  ── fetch, format, send, and leave a "sent today" marker
         │
         ├─ games_today.py ── free events check → filter to today (Central)
         │        └─ odds_api.py ── paid odds request, only if games exist
@@ -86,7 +89,18 @@ GitHub Actions (cron: 13:00 and 14:00 UTC)
         └─ telegram_bot.py ── sendMessage via the Telegram Bot API
 ```
 
-GitHub's cron runs on UTC, which doesn't follow daylight saving. The workflow schedules both 13:00 and 14:00 UTC, and `main.py --only-at-hour 8` makes sure exactly one of them sends.
+### Why it runs every hour
+
+GitHub's cron runs on UTC, which doesn't follow daylight saving, and GitHub starts scheduled runs **late**: usually 10 to 35 minutes, and sometimes hours. My first version ran twice a day and only sent if the clock said exactly 8 AM Central. One day GitHub started both runs over an hour late, both correctly decided it was too late, and no digest was sent.
+
+The fix is to stop depending on one moment:
+
+1. The workflow starts every hour from 13:00 to 20:00 UTC, which covers 8 AM to 2 PM Central in both summer and winter.
+2. `gate.py` lets a run through only if it is inside that window. The first run inside it sends the digest.
+3. `main.py` then writes a small marker, which the workflow saves in GitHub's cache under today's date. Later runs find the marker and do nothing, so you get one digest a day.
+4. If a run is late or fails completely, the next hour's run covers it. A concurrency lock stops two runs from sending at once.
+
+The tests simulate GitHub starting every run up to four hours late, in both seasons and on the days daylight saving starts and ends, and check that a run always lands inside the window.
 
 ## Tech
 
@@ -100,6 +114,7 @@ GitHub's cron runs on UTC, which doesn't follow daylight saving. The workflow sc
 | File | Purpose |
 |---|---|
 | `main.py` | Entry point: runs the whole digest and handles errors |
+| `gate.py` | Decides whether a scheduled run is inside the send window |
 | `config.py` | Sports list, sport emoji, markets per sport, MMA filter, credit warning level |
 | `odds_api.py` | Odds API requests: events (free), odds, and live scores |
 | `games_today.py` | Converts to Central time, keeps today's games, attaches live scores |
@@ -149,10 +164,10 @@ The tests use small fake games, so they make no API calls, spend no credits and 
 - Central-time conversion and the "starts today" window, including the days daylight saving starts and ends
 - message layout: live games, the soccer Draw row and total goals, MMA, HTML escaping, and splitting long slates under Telegram's limit
 - team emoji, soccer kit colors and UFC flags (matching rules, no duplicates within a league, every league complete)
-- the safety rails: secret scrubbing, the 8 AM guard in both daylight-saving seasons, the credit guard, retries, and how one failing sport is reported
+- the safety rails: secret scrubbing, the send window (including late GitHub starts), the sent-today marker, the credit guard, retries, and how one failing sport is reported
 - the full `main.run()` flow with Telegram and the API replaced by fakes
 
-I also checked that the tests are able to fail: breaking the code on purpose in a throwaway copy (for example flipping the 8 AM check or turning off secret scrubbing) made them fail every time.
+I also checked that the tests are able to fail: breaking the code on purpose in a throwaway copy (for example shifting the send window or turning off secret scrubbing) made them fail every time.
 
 GitHub runs the same tests on every push using `.github/workflows/tests.yml`. The daily digest job does not install the test tools.
 
@@ -160,7 +175,7 @@ GitHub runs the same tests on every push using `.github/workflows/tests.yml`. Th
 
 1. Push this repo to GitHub.
 2. Go to **Settings → Secrets and variables → Actions** and add three repository secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` and `ODDS_API_KEY`.
-3. Open the **Actions** tab, choose **Daily odds digest**, and click **Run workflow** to test. After that it runs by itself every day at 8 AM Central.
+3. Open the **Actions** tab, choose **Daily odds digest**, and click **Run workflow** to test. After that it runs by itself every day, sending around 8 AM Central (or as soon after as GitHub starts the run, up to 2 PM). A manual run always sends immediately.
 
 ## Configuration
 
@@ -170,6 +185,7 @@ Everything you're likely to change is in `config.py`:
 - `MARKETS`, `SOCCER_MARKETS` and `SPORT_MARKETS` set which markets each sport requests, and `TOTAL_LABELS` names the over/under section ("Total goals", "Total runs").
 - `MIN_BOOKMAKERS` hides fights that few sportsbooks offer (used for MMA).
 - `LOW_CREDITS_WARNING` sets when the bot warns you about your remaining quota.
+- `SEND_FROM_HOUR` and `SEND_UNTIL_HOUR` set the send window (Central time). If you change the window, adjust the hourly cron in `.github/workflows/daily-odds.yml` to cover it in UTC; a test checks the two stay consistent.
 
 ## Keeping the emoji up to date
 
@@ -185,7 +201,8 @@ Emoji are matched by team name, so most things need no changes. A few events nee
 - The API's MMA feed mixes UFC with other promotions and offers no promotion field. `MIN_BOOKMAKERS` trims low-coverage fights but can't isolate UFC perfectly, and the fighter flags are a hand-kept list that will always lag behind new fighters.
 - A live score is a snapshot taken when the digest runs. The Telegram message does not update itself.
 - Kit colors can clash (two red teams in one game), and some newer emoji may not render on older phones.
-- GitHub may start scheduled runs a few minutes late, and on public repositories it pauses schedules after about 60 days without repository activity.
+- GitHub may start scheduled runs late, so the digest usually arrives somewhere between 8:10 and 9 AM Central, and in rare cases later (any time before 2 PM). If GitHub skipped every scheduled run in the window, nothing would be sent. On public repositories GitHub also pauses schedules after about 60 days without repository activity.
+- The "sent today" marker lives in GitHub's cache, which can be evicted. In the unlikely event that happens mid-morning, a second digest could be sent.
 - Each sport shows spread or total, not both. Showing both for a sport would cost 1 more credit per sport per day.
 
 ## License

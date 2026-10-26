@@ -101,3 +101,10 @@ def markets_for(sport_name):
 # If your remaining monthly credits fall below this, the bot adds a warning
 # to your Telegram digest.
 LOW_CREDITS_WARNING = 50
+
+# The scheduled digest is sent by the first run that starts between these two
+# hours of the day in Central time (8 AM up to, but not including, 2 PM).
+# GitHub often starts scheduled runs late, sometimes by hours, so this window
+# is deliberately wide. See gate.py and .github/workflows/daily-odds.yml.
+SEND_FROM_HOUR = 8
+SEND_UNTIL_HOUR = 14

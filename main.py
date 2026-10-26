@@ -3,6 +3,10 @@ main.py - the daily odds digest. This is the file that gets scheduled.
 
     python main.py             fetch today's games and send them to Telegram
     python main.py --dry-run   same, but only PRINT the messages (nothing sent)
+    python main.py --marker-file sent.marker
+                               same as the first, and also write that file once
+                               the digest is delivered (used by the scheduled
+                               GitHub run to avoid sending twice in one day)
 
 Note: a dry run still calls the Odds API, so it still uses credits for any
 sport that has a game today.
@@ -19,12 +23,12 @@ What happens, in order:
 import html
 import sys
 import time
-from datetime import datetime
+from pathlib import Path
 
 import telegram_bot
 from config import LOW_CREDITS_WARNING, MIN_BOOKMAKERS, SPORTS, markets_for
 from format_digest import format_sport_messages, plain_preview
-from games_today import CENTRAL, fetch_todays_games_with_odds
+from games_today import fetch_todays_games_with_odds
 from odds_api import ODDS_API_KEY
 from telegram_bot import send_message
 
@@ -51,23 +55,14 @@ def deliver(message, dry_run):
     time.sleep(1)  # Telegram dislikes bursts; one message per second is safe
 
 
-def skip_reason(argv, now=None):
-    """Explain why this run should do nothing, or return None to go ahead.
+def run(dry_run, marker_path=None):
+    """Do the whole digest. Returns 0 if all went well, 1 if anything failed.
 
-    With "--only-at-hour 8" we only run when it is really 8 AM Central.
-    (`now` is for the tests. Normally it is the current time.)
+    `marker_path` is used by the scheduled GitHub run. When the digest was
+    delivered, we write a small file there. The workflow saves it, so the
+    next hourly run knows today's digest is already done and does nothing.
+    We do NOT write it if every sport failed, so the next run can try again.
     """
-    if "--only-at-hour" not in argv:
-        return None
-    wanted_hour = int(argv[argv.index("--only-at-hour") + 1])
-    current_hour = (now or datetime.now(CENTRAL)).astimezone(CENTRAL).hour
-    if current_hour != wanted_hour:
-        return f"It is {current_hour}:00 Central, not {wanted_hour}:00. Skipping this run."
-    return None
-
-
-def run(dry_run):
-    """Do the whole digest. Returns 0 if all went well, 1 if anything failed."""
     errors = []
     credits_left = None   # we learn this from the Odds API as we go
     sent_any = False
@@ -102,24 +97,28 @@ def run(dry_run):
         # Keep the error short: first 1000 characters, escaped for Telegram HTML.
         details = html.escape("\n".join(errors)[:1000])
         deliver(f"⚠️ <b>Odds bot problem</b>\n{details}", dry_run)
-        return 1
-    return 0
+
+    # "Delivered" = at least one real digest message went out, or there was
+    # simply nothing to report. If every sport failed, we leave no marker, so
+    # the next hourly run tries again.
+    delivered = sent_any or not errors
+    if marker_path and delivered and not dry_run:
+        Path(marker_path).write_text("digest sent\n", encoding="utf-8")
+
+    return 1 if errors else 0
 
 
 if __name__ == "__main__":
     dry_run = "--dry-run" in sys.argv
 
-    # GitHub schedules are in UTC and know nothing about daylight saving, so
-    # the workflow runs us twice a day (13:00 and 14:00 UTC) and passes
-    # "--only-at-hour 8". We quietly do nothing unless it is really 8 AM in
-    # Central time right now, so exactly one of the two runs sends the digest.
-    reason = skip_reason(sys.argv)
-    if reason:
-        print(reason)
-        sys.exit(0)
+    # The scheduled GitHub run passes "--marker-file sent.marker" (see
+    # .github/workflows/daily-odds.yml). Deciding WHEN to run is gate.py's job.
+    marker_path = None
+    if "--marker-file" in sys.argv:
+        marker_path = sys.argv[sys.argv.index("--marker-file") + 1]
 
     try:
-        exit_code = run(dry_run)
+        exit_code = run(dry_run, marker_path)
     except Exception as error:
         # Something unexpected (for example Telegram itself being down).
         message = scrub(str(error))

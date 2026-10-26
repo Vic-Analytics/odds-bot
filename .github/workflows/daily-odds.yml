@@ -1,21 +1,35 @@
 # This file tells GitHub Actions WHEN to run the bot and HOW.
 # GitHub reads every .yml file in .github/workflows/ automatically.
+#
+# How the daily schedule works (and why it is built this way):
+#   GitHub starts scheduled runs LATE, usually by 10-35 minutes and sometimes
+#   by hours, and its cron times are in UTC (no daylight saving). A single
+#   "run at exactly 8 AM" job therefore misses days. Instead:
+#     1. The job starts every hour (13:00-20:00 UTC covers 8 AM-2 PM Central
+#        in both summer and winter).
+#     2. gate.py checks if it is between 8 AM and 2 PM Central.
+#     3. The first run inside that window sends the digest and saves a small
+#        "sent today" marker. Later runs find the marker and do nothing.
+#     4. If a run is late or fails, the next hour's run covers it.
 
 name: Daily odds digest
 
 on:
   schedule:
-    # Cron times are always in UTC. 8 AM Central is 13:00 UTC in summer
-    # (daylight time) and 14:00 UTC in winter (standard time). We schedule
-    # BOTH, and main.py skips whichever one isn't really 8 AM Central.
-    - cron: "0 13 * * *"
-    - cron: "0 14 * * *"
+    - cron: "0 13-20 * * *"
   # Adds a "Run workflow" button in the Actions tab, so you can test by hand.
+  # A manual run always sends right away and ignores the daily marker.
   workflow_dispatch:
 
 # The bot only needs to read the code, nothing more.
 permissions:
   contents: read
+
+# Never run two copies at once, so two overlapping runs can't both send.
+# A waiting run starts after the first finishes and then sees its marker.
+concurrency:
+  group: daily-odds-digest
+  cancel-in-progress: false
 
 jobs:
   send-digest:
@@ -26,23 +40,54 @@ jobs:
       # 1. Download your repository's code onto the temporary machine.
       - uses: actions/checkout@v4
 
-      # 2. Install Python.
+      # 2. Is it time to send? (gate.py uses only Python's standard library,
+      #    so this takes a second.) Scheduled runs outside 8 AM-2 PM Central
+      #    stop here. Manual runs always continue.
+      - name: Is it time to send?
+        id: gate
+        run: python3 gate.py "${{ github.event_name }}"
+
+      # 3. Was today's digest already sent by an earlier run? The marker is
+      #    stored in GitHub's cache under a key containing today's date.
+      - name: Was today's digest already sent?
+        id: already
+        if: steps.gate.outputs.go == 'true' && github.event_name == 'schedule'
+        uses: actions/cache/restore@v4
+        with:
+          path: sent.marker
+          key: digest-sent-${{ steps.gate.outputs.today }}
+
+      # 4. Install Python and the libraries (only when we are going to send).
       - uses: actions/setup-python@v5
+        if: steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true'
         with:
           python-version: "3.12"
           cache: pip
 
-      # 3. Install the libraries from requirements.txt.
-      - run: pip install -r requirements.txt
+      - name: Install requirements
+        if: steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true'
+        run: pip install -r requirements.txt
 
-      # 4. Run the bot. The secrets you stored on GitHub become environment
+      # 5. Run the bot. The secrets you stored on GitHub become environment
       #    variables with the same names as in your .env file, which is exactly
-      #    where our code looks for them.
-      #    For scheduled runs we add --only-at-hour 8 (the daylight-saving guard).
-      #    When you click "Run workflow" yourself, it sends right away.
+      #    where our code looks for them. On scheduled runs, main.py also writes
+      #    sent.marker once the digest is delivered.
       - name: Send the digest
-        run: python main.py ${{ github.event_name == 'schedule' && '--only-at-hour 8' || '' }}
+        if: steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true'
+        run: python main.py ${{ github.event_name == 'schedule' && '--marker-file sent.marker' || '' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+
+      # 6. Remember that today's digest was sent. This runs even if main.py
+      #    exited with an error code (for example one sport failed but the
+      #    others were delivered). It only saves when the marker file exists,
+      #    so a run where everything failed leaves no marker and the next
+      #    hour's run tries again.
+      - name: Remember that today's digest was sent
+        if: always() && github.event_name == 'schedule' && steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true' && hashFiles('sent.marker') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: sent.marker
+          key: digest-sent-${{ steps.gate.outputs.today }}
