@@ -1,4 +1,4 @@
-"""Tests for the safety rails: secret scrubbing, the 8 AM guard, credits, errors."""
+"""Tests for the safety rails: secret scrubbing, credits, errors, the sent-today marker."""
 
 import pytest
 

@@ -2,7 +2,7 @@
 
 [![Tests](https://github.com/Vic-Analytics/odds-bot/actions/workflows/tests.yml/badge.svg)](https://github.com/Vic-Analytics/odds-bot/actions/workflows/tests.yml)
 
-A Python bot that sends a formatted digest of **today's games and best available betting lines** to Telegram every morning at 8 AM Central. It runs in the cloud on GitHub Actions, so no computer needs to stay on.
+A Python bot that sends a formatted digest of **today's games and best available betting lines** to Telegram every morning, scheduled for 7:15 AM Central. It runs in the cloud on GitHub Actions, so no computer needs to stay on.
 
 > For information only. This project does not place bets or give betting advice.
 
@@ -71,10 +71,10 @@ A busy month with all 15 leagues comes to roughly 315 credits by my estimate.
 ## How it works
 
 ```
-GitHub Actions (cron: every hour, 13:00-20:00 UTC)
+GitHub Actions (cron: every hour at :15, 12:15-19:15 UTC)
         │
         ▼
-   gate.py  ── inside the 8 AM-2 PM Central window? already sent today? (else stop)
+   gate.py  ── inside the 7 AM-2 PM Central window? already sent today? (else stop)
         │
         ▼
    main.py  ── fetch, format, send, and leave a "sent today" marker
@@ -91,11 +91,11 @@ GitHub Actions (cron: every hour, 13:00-20:00 UTC)
 
 ### Why it runs every hour
 
-GitHub's cron runs on UTC, which doesn't follow daylight saving, and GitHub starts scheduled runs **late**: usually 10 to 35 minutes, and sometimes hours. My first version ran twice a day and only sent if the clock said exactly 8 AM Central. One day GitHub started both runs over an hour late, both correctly decided it was too late, and no digest was sent.
+GitHub's cron runs on UTC, which doesn't follow daylight saving, and GitHub starts scheduled runs **late**: often 30 to 50 minutes, and sometimes hours. My first version ran twice a day and only sent if the clock said exactly 8 AM Central. One day GitHub started both runs over an hour late, both correctly decided it was too late, and no digest was sent.
 
 The fix is to stop depending on one moment:
 
-1. The workflow starts every hour from 13:00 to 20:00 UTC, which covers 8 AM to 2 PM Central in both summer and winter.
+1. The workflow starts every hour at 15 minutes past, from 12:15 to 19:15 UTC. That covers 7:15 AM to 2 PM Central in both summer and winter. GitHub is busiest at the top of the hour and recommends avoiding :00, so the schedule uses :15.
 2. `gate.py` lets a run through only if it is inside that window. The first run inside it sends the digest.
 3. `main.py` then writes a small marker, which the workflow saves in GitHub's cache under today's date. Later runs find the marker and do nothing, so you get one digest a day.
 4. If a run is late or fails completely, the next hour's run covers it. A concurrency lock stops two runs from sending at once.
@@ -175,7 +175,7 @@ GitHub runs the same tests on every push using `.github/workflows/tests.yml`. Th
 
 1. Push this repo to GitHub.
 2. Go to **Settings → Secrets and variables → Actions** and add three repository secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` and `ODDS_API_KEY`.
-3. Open the **Actions** tab, choose **Daily odds digest**, and click **Run workflow** to test. After that it runs by itself every day, sending around 8 AM Central (or as soon after as GitHub starts the run, up to 2 PM). A manual run always sends immediately.
+3. Open the **Actions** tab, choose **Daily odds digest**, and click **Run workflow** to test. After that it runs by itself every day, sending at the first scheduled run after 7 AM Central (the first slot is 7:15 AM; GitHub's late starts push it later, and a run can send any time up to 2 PM). A manual run always sends immediately.
 
 ## Configuration
 
@@ -201,7 +201,7 @@ Emoji are matched by team name, so most things need no changes. A few events nee
 - The API's MMA feed mixes UFC with other promotions and offers no promotion field. `MIN_BOOKMAKERS` trims low-coverage fights but can't isolate UFC perfectly, and the fighter flags are a hand-kept list that will always lag behind new fighters.
 - A live score is a snapshot taken when the digest runs. The Telegram message does not update itself.
 - Kit colors can clash (two red teams in one game), and some newer emoji may not render on older phones.
-- GitHub may start scheduled runs late, so the digest usually arrives somewhere between 8:10 and 9 AM Central, and in rare cases later (any time before 2 PM). If GitHub skipped every scheduled run in the window, nothing would be sent. On public repositories GitHub also pauses schedules after about 60 days without repository activity.
+- GitHub may start scheduled runs late, so the digest usually arrives some 30 to 50 minutes after the 7:15 AM slot (around 8 AM Central), and in rare cases later (any time before 2 PM). If GitHub skipped every scheduled run in the window, nothing would be sent. On public repositories GitHub also pauses schedules after about 60 days without repository activity.
 - The "sent today" marker lives in GitHub's cache, which can be evicted. In the unlikely event that happens mid-morning, a second digest could be sent.
 - Each sport shows spread or total, not both. Showing both for a sport would cost 1 more credit per sport per day.
 

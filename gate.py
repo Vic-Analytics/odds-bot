@@ -2,10 +2,10 @@
 gate.py - decides whether a scheduled run should send the digest right now.
 
 Why this exists: GitHub starts scheduled workflows late, usually by 10-35
-minutes and occasionally by hours. So instead of "run at exactly 8 AM", the
+minutes and occasionally by hours. So instead of "run at exactly one time", the
 workflow starts every hour, and each run asks this script:
 
-    "Is it inside the send window (8 AM to 2 PM Central)?"
+    "Is it inside the send window (7 AM to 2 PM Central)?"
 
 The first run inside the window sends the digest and leaves a marker for the
 day; later runs see the marker and do nothing. (The marker part lives in the

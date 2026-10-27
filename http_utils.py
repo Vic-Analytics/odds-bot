@@ -1,7 +1,7 @@
 """
 http_utils.py - one place for making web requests that retry on hiccups.
 
-Why: at 8 AM the bot makes a handful of web requests. If one of them hits a
+Why: each morning the bot makes a handful of web requests. If one of them hits a
 momentary problem (a timeout, a dropped connection, a server saying "try again
 in a moment"), a single failure used to cost you that day's digest. Now we try
 a few times before giving up.

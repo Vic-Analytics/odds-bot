@@ -103,8 +103,10 @@ def markets_for(sport_name):
 LOW_CREDITS_WARNING = 50
 
 # The scheduled digest is sent by the first run that starts between these two
-# hours of the day in Central time (8 AM up to, but not including, 2 PM).
+# hours of the day in Central time (7 AM up to, but not including, 2 PM).
+# The workflow's first slot of the day is 7:15 AM Central; see the cron line
+# in .github/workflows/daily-odds.yml.
 # GitHub often starts scheduled runs late, sometimes by hours, so this window
 # is deliberately wide. See gate.py and .github/workflows/daily-odds.yml.
-SEND_FROM_HOUR = 8
+SEND_FROM_HOUR = 7
 SEND_UNTIL_HOUR = 14
