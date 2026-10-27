@@ -81,7 +81,24 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
 
-      # 6. Remember that today's digest was sent. This runs even if main.py
+      # 6. Keep the odds the bot just pulled. The runner is wiped after this job,
+      #    so the raw files from data/raw are copied into a separate PRIVATE
+      #    repo (odds-history-data) with a deploy key that can write to that
+      #    one repo only. This runs AFTER the digest is sent, so a problem
+      #    saving data can never stop or delay your message; it shows up as a
+      #    red run (and a GitHub email) instead. It also runs for manual runs,
+      #    since those spend real credits too.
+      - name: Save the raw odds to the private data repo
+        if: always() && steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true' && hashFiles('data/raw/**/*.json') != ''
+        env:
+          DEPLOY_KEY: ${{ secrets.ODDS_DATA_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/data_deploy_key
+          chmod 600 ~/.ssh/data_deploy_key
+          python scripts/publish_data.py --publish data/raw=raw --ssh-key ~/.ssh/data_deploy_key
+
+      # 7. Remember that today's digest was sent. This runs even if main.py
       #    exited with an error code (for example one sport failed but the
       #    others were delivered). It only saves when the marker file exists,
       #    so a run where everything failed leaves no marker and the next

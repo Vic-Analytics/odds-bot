@@ -126,7 +126,7 @@ The tests simulate GitHub starting every run up to four hours late, in both seas
 | `telegram_bot.py` | Sends messages to Telegram |
 | `http_utils.py` | Web requests that retry on temporary failures |
 | `storage.py` | Saves every odds response: raw JSON archive + SQLite database |
-| `scripts/` | `backfill_from_raw.py` (rebuild the database) and an example SQL query |
+| `scripts/` | `backfill_from_raw.py` (rebuild the database), `publish_data.py` (save raw files to the private data repo) and an example SQL query |
 | `get_chat_id.py` | One-time helper to find your Telegram chat ID |
 | `tests/` | Automated tests (fake data only, no network) |
 | `.github/workflows/daily-odds.yml` | The schedule and cloud job |
@@ -163,7 +163,7 @@ Every time the bot pulls odds from The Odds API, `storage.py` keeps a copy. It r
 - **Safe:** a storage problem is logged and never stops the Telegram digest.
 - **Example:** `scripts/best_moneyline_today.sql` lists today's best moneyline per team across sportsbooks (`sqlite3 data/odds.db < scripts/best_moneyline_today.sql`).
 
-The `data/` folder is not committed to this repository. A bot run on GitHub's temporary machines would lose it, so the raw files are kept in a separate private repository. The `results` table is created but empty for now; final scores will be added from free sources.
+The `data/` folder is not committed to this repository. A bot run on GitHub's temporary machines would lose it, so after the digest is sent, `scripts/publish_data.py` copies the new raw files into a separate **private** repository (`odds-history-data`) using a deploy key that can write to that one repo only (stored as the secret `ODDS_DATA_DEPLOY_KEY`). Files are only ever added, never overwritten. To analyze the data on your own computer, clone that repo and run `python scripts/backfill_from_raw.py --raw-dir <path to the clone>/raw --rebuild`. The `results` table is created but empty for now; final scores will be added from free sources.
 
 ## Tests
 
