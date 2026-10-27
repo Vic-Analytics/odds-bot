@@ -53,7 +53,7 @@ Soccer also shows the over/under on goals, and clubs get kit-color dots:
 - **Telegram-friendly output.** HTML formatting, one message per sport, and automatic splitting when a long slate would pass Telegram's 4096-character limit.
 - **Failure alerts.** If a sport fails, the others still send, and a short error message arrives on Telegram. The run also exits with an error code, so GitHub marks it failed.
 - **Retries.** Timeouts, dropped connections and temporary server errors are retried up to 3 times. Client errors (a bad key) and exhausted API credits are not, because trying again can't help.
-- **Tested.** About 90 automated tests run on every push (see below).
+- **Tested.** Around 200 automated tests run on every push (see below).
 - **Secrets stay secret.** Keys live in `.env` locally and in GitHub Secrets in the cloud. Error text is scrubbed of keys and tokens before it is shown anywhere, because Python network errors can include the full request URL.
 
 ## Built to stay inside a free API tier
@@ -126,11 +126,15 @@ The tests simulate GitHub starting every run up to four hours late, in both seas
 | `telegram_bot.py` | Sends messages to Telegram |
 | `http_utils.py` | Web requests that retry on temporary failures |
 | `storage.py` | Saves every odds response: raw JSON archive + SQLite database |
+| `results.py` | Fetches final scores from free sources, saves them, and attaches them to games |
+| `names.py` | Decides whether two team names from different sources are the same team |
 | `scripts/` | `backfill_from_raw.py` (rebuild the database), `publish_data.py` (save raw files to the private data repo) and an example SQL query |
 | `get_chat_id.py` | One-time helper to find your Telegram chat ID |
 | `tests/` | Automated tests (fake data only, no network) |
 | `.github/workflows/daily-odds.yml` | The schedule and cloud job |
+| `.github/workflows/results.yml` | Daily job that saves final scores to the private data repo |
 | `.github/workflows/tests.yml` | Runs the tests on every push and pull request |
+| `analysis/` | Read-only analysis tools: SQL, a loader and a starter notebook (own requirements) |
 
 ## Run it locally
 
@@ -151,6 +155,7 @@ python games_today.py            # free: lists today's games for every sport
 python check_emoji.py            # free: which teams have no emoji yet
 python main.py --dry-run         # prints the digest (uses API credits)
 python main.py                   # sends the digest to Telegram
+python results.py --files-only   # saves yesterday's final scores (free, no credits)
 ```
 
 ## Odds history
@@ -163,7 +168,23 @@ Every time the bot pulls odds from The Odds API, `storage.py` keeps a copy. It r
 - **Safe:** a storage problem is logged and never stops the Telegram digest.
 - **Example:** `scripts/best_moneyline_today.sql` lists today's best moneyline per team across sportsbooks (`sqlite3 data/odds.db < scripts/best_moneyline_today.sql`).
 
-The `data/` folder is not committed to this repository. A bot run on GitHub's temporary machines would lose it, so after the digest is sent, `scripts/publish_data.py` copies the new raw files into a separate **private** repository (`odds-history-data`) using a deploy key that can write to that one repo only (stored as the secret `ODDS_DATA_DEPLOY_KEY`). Files are only ever added, never overwritten. To analyze the data on your own computer, clone that repo and run `python scripts/backfill_from_raw.py --raw-dir <path to the clone>/raw --rebuild`. The `results` table is created but empty for now; final scores will be added from free sources.
+The `data/` folder is not committed to this repository. A bot run on GitHub's temporary machines would lose it, so after the digest is sent, `scripts/publish_data.py` copies the new raw files into a separate **private** repository (`odds-history-data`) using a deploy key that can write to that one repo only (stored as the secret `ODDS_DATA_DEPLOY_KEY`). Files are only ever added, never overwritten. To analyze the data on your own computer, clone that repo and run `python scripts/backfill_from_raw.py --raw-dir <path to the clone>/raw --rebuild`. Raw odds files are not the only thing kept there: final scores are too (see below).
+
+### Final scores
+
+A second job, `results.py`, runs every morning (`.github/workflows/results.yml`) and saves the previous days' final scores from free sources that need no key and use no Odds API credits: ESPN's public scoreboard (NFL, NBA, WNBA and the soccer leagues), `statsapi.mlb.com` (MLB) and `api-web.nhle.com` (NHL). MMA has no free source and is skipped. Because the sources' own pages are large, only a compact record of the **final** games is saved, as `results_raw/YYYY-MM-DD/<sport_key>__HHMMSSZ.json` in the same private repo.
+
+Scores are attached to games when the database is built, not when they are fetched. `names.py` matches them by league, team name (reusing the nickname and alias rules from the emoji files) and start time, so a name that does not match can be fixed with one alias and a rebuild, without fetching anything again. Rebuild everything with:
+
+```powershell
+python scripts/backfill_from_raw.py --rebuild --raw-dir ..\odds-history-data\raw --results-dir ..\odds-history-data\results_raw
+```
+
+`results.status` records how each game ended (`FINAL`, `FINAL_OT`, `FINAL_SO`, `FULL_TIME`, `FINAL_AET`, `FINAL_PEN`), so overtime and extra time can be filtered out.
+
+### Analysis
+
+`analysis/` has its own requirements (pandas, Jupyter) and only **reads** the database. `analysis/sql/game_lines.sql` builds one row per finished game with the consensus pre-game lines and the result, and `analysis/starter_questions.ipynb` answers example questions such as how often home underdogs win and whether NBA totals go over more on back-to-backs. See `analysis/README.md`.
 
 ## Tests
 

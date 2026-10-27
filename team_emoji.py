@@ -72,19 +72,33 @@ WNBA = {
 TEAM_EMOJI = {"NFL": NFL, "NBA": NBA, "NHL": NHL, "MLB": MLB, "WNBA": WNBA}
 
 
-def emoji_for(sport_name, team_name):
-    """Return the emoji for a team, or "" if the league or team isn't mapped."""
+def _match(sport_name, team_name):
+    """The (nickname, emoji) a team name ends with, or (None, "") if no match."""
     nicknames = TEAM_EMOJI.get(sport_name)
     if not nicknames:
-        return ""
+        return None, ""
     name = team_name.strip().lower()
     for nickname, emoji in nicknames.items():
         nick = nickname.lower()
         # Match whole words at the END of the name: "kings" matches
         # "Los Angeles Kings" but not something like "Bookings".
         if name == nick or name.endswith(" " + nick):
-            return emoji
-    return ""
+            return nick, emoji
+    return None, ""
+
+
+def emoji_for(sport_name, team_name):
+    """Return the emoji for a team, or "" if the league or team isn't mapped."""
+    return _match(sport_name, team_name)[1]
+
+
+def nickname_for(sport_name, team_name):
+    """The team's lowercase nickname ("kings"), or None if the league or team isn't mapped.
+
+    "Los Angeles Kings" and the NHL's own short name "Kings" both give "kings",
+    which is how results from other sources are matched to the bot's games.
+    """
+    return _match(sport_name, team_name)[0]
 
 
 def team_label(sport_name, team_name):
