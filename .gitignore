@@ -16,3 +16,6 @@ __pycache__/
 
 # Odds history: raw API responses and the SQLite database (kept in a separate private repo)
 data/
+
+# Jupyter
+.ipynb_checkpoints/

@@ -281,3 +281,21 @@ def test_best_moneyline_query_picks_the_best_price_per_team_and_ignores_live_odd
         ("Pittsburgh Penguins", 150, "draftkings"),   # +150 beats +145
     ]
     assert rows[0][1] == "2026-10-29 18:30:00"        # shown in Central time
+
+
+# ---------- upgrading an older database ----------
+
+def test_a_version_1_database_gains_the_results_status_column():
+    db = storage.db_path()
+    db.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(db)) as old:       # how the results table looked in version 1
+        old.execute("CREATE TABLE results (event_id TEXT PRIMARY KEY, home_score INTEGER, away_score INTEGER, "
+                    "completed INTEGER, source TEXT, updated_at TEXT)")
+        old.execute("INSERT INTO results VALUES ('evt1', 3, 2, 1, 'old', '2026-10-01T00:00:00Z')")
+        old.execute("PRAGMA user_version = 1")
+        old.commit()
+    storage.save_snapshot(SPORT, response(), pulled_at=PULL1)           # opens it with the current code
+    columns = [row[1] for row in query("PRAGMA table_info(results)")]
+    assert "status" in columns
+    assert query("SELECT event_id, home_score, status FROM results") == [("evt1", 3, None)]   # old rows kept
+    assert query("PRAGMA user_version")[0][0] == storage.SCHEMA_VERSION

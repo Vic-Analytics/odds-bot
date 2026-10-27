@@ -34,3 +34,29 @@ def test_the_deploy_key_is_only_exposed_to_the_one_step_that_needs_it():
 
 def test_the_key_is_written_with_private_permissions():
     assert "chmod 600 ~/.ssh/data_deploy_key" in WORKFLOW
+
+
+# ---------- the daily results workflow ----------
+
+RESULTS = (Path(__file__).parent.parent / ".github" / "workflows" / "results.yml").read_text(encoding="utf-8")
+
+
+def test_results_job_saves_files_only_then_publishes_even_if_a_league_failed():
+    fetch = RESULTS.index("python results.py --files-only")
+    save = RESULTS.index("- name: Save the scores to the private data repo")
+    assert fetch < save
+    block = RESULTS[save:]
+    assert "if: always()" in block and "hashFiles('data/results_raw/**/*.json') != ''" in block
+    assert "--publish data/results_raw=results_raw" in block
+
+
+def test_results_job_uses_the_deploy_key_only_where_needed_and_avoids_the_top_of_the_hour():
+    assert RESULTS.count("secrets.ODDS_DATA_DEPLOY_KEY") == 1
+    assert "secrets.ODDS_API_KEY" not in RESULTS           # it never touches the Odds API
+    assert 'cron: "37 12 * * *"' in RESULTS
+
+
+def test_the_days_input_reaches_the_script_through_an_environment_variable():
+    # Not pasted straight into the shell command, which would allow command injection.
+    assert 'DAYS: ${{ inputs.days || \'2\' }}' in RESULTS
+    assert '--days "$DAYS"' in RESULTS

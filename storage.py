@@ -37,7 +37,7 @@ from pathlib import Path
 
 # Bump this when the tables change. It is stored in the database
 # (PRAGMA user_version) so a later version can tell what it is looking at.
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 DEFAULT_DATA_DIR = Path(__file__).parent / "data"
 
@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS results (
     away_score INTEGER,
     completed  INTEGER,            -- 1 when the game is final
     source     TEXT,               -- where the score came from
-    updated_at TEXT
+    updated_at TEXT,
+    status     TEXT                -- FINAL, FINAL_OT, FINAL_SO, FULL_TIME, FINAL_AET, FINAL_PEN...
 );
 
 CREATE TABLE IF NOT EXISTS pulls (
@@ -107,6 +108,11 @@ def db_path():
     return data_dir() / "odds.db"
 
 
+def results_dir():
+    """Where the final-score files are kept (see results.py)."""
+    return data_dir() / "results_raw"
+
+
 def utc_now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -131,12 +137,20 @@ def _to_float(value):
 
 # ---------- the database ----------
 
+def _upgrade(conn):
+    """Bring a database made by an older version up to date (adds new columns)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(results)")}
+    if "status" not in columns:      # added in schema version 2
+        conn.execute("ALTER TABLE results ADD COLUMN status TEXT")
+
+
 def connect(db_file):
     """Open (creating if needed) the database and make sure the tables exist."""
     db_file = Path(db_file)
     db_file.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_file, timeout=10)
     conn.executescript(SCHEMA)
+    _upgrade(conn)
     conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
     conn.commit()
     return conn
@@ -205,10 +219,13 @@ def insert_snapshot(conn, sport_key, response_json, pulled_at):
 
 # ---------- the raw archive ----------
 
-def raw_path_for(sport_key, pulled_at):
-    """data/raw/2026-10-28/icehockey_nhl__134855Z.json for a pull at 13:48:55 UTC."""
+def raw_path_for(sport_key, pulled_at, folder="raw"):
+    """data/raw/2026-10-28/icehockey_nhl__134855Z.json for a pull at 13:48:55 UTC.
+
+    (results.py uses folder="results_raw" for the final-score files.)
+    """
     day, time_part = pulled_at.rstrip("Z").split("T")
-    return data_dir() / "raw" / day / f"{sport_key}__{time_part.replace(':', '')}Z.json"
+    return data_dir() / folder / day / f"{sport_key}__{time_part.replace(':', '')}Z.json"
 
 
 def _write_raw(sport_key, response_json, raw_body, pulled_at):

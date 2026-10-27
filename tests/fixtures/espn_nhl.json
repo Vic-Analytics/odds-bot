@@ -1,0 +1,97 @@
+{
+ "events": [
+  {
+   "id": "401892582",
+   "date": "2026-10-26T23:00Z",
+   "status": {
+    "type": {
+     "name": "STATUS_FINAL",
+     "completed": true,
+     "detail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "New York Rangers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "6",
+       "team": {
+        "displayName": "Los Angeles Kings"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892583",
+   "date": "2026-10-27T00:30Z",
+   "status": {
+    "type": {
+     "name": "STATUS_FINAL",
+     "completed": true,
+     "detail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "5",
+       "team": {
+        "displayName": "Calgary Flames"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Toronto Maple Leafs"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401892584",
+   "date": "2026-10-27T01:30Z",
+   "status": {
+    "type": {
+     "name": "STATUS_FINAL",
+     "completed": true,
+     "detail": "Final/SO"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "Edmonton Oilers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "4",
+       "team": {
+        "displayName": "Detroit Red Wings"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

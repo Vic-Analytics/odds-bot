@@ -1,0 +1,3 @@
+# Only needed for analysis. The bot itself never installs these.
+pandas
+jupyter
