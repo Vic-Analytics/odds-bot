@@ -13,3 +13,6 @@ __pycache__/
 
 # pytest's cache
 .pytest_cache/
+
+# Odds history: raw API responses and the SQLite database (kept in a separate private repo)
+data/

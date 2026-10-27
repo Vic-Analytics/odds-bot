@@ -13,8 +13,13 @@ def outcome(name, price, point=None):
 def book(title, **markets):
     """book("FanDuel", h2h=[outcome(...), ...], spreads=[...], totals=[...])"""
     return {
+        "key": title.lower().replace(" ", "").replace(".", ""),   # like the API's "draftkings"
         "title": title,
-        "markets": [{"key": key, "outcomes": outcomes} for key, outcomes in markets.items()],
+        "last_update": "2026-10-28T13:40:00Z",
+        "markets": [
+            {"key": key, "last_update": "2026-10-28T13:40:00Z", "outcomes": outcomes}
+            for key, outcomes in markets.items()
+        ],
     }
 
 

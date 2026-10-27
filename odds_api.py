@@ -20,6 +20,7 @@ load_dotenv(Path(__file__).parent / ".env")
 
 from config import MARKETS, SPORTS  # the settings live in config.py
 from http_utils import request_with_retries  # web requests that retry on hiccups
+from storage import save_snapshot  # saves every odds response for later analysis
 
 ODDS_API_KEY = os.environ.get("ODDS_API_KEY")
 
@@ -101,7 +102,14 @@ def fetch_odds(sport_key, markets=MARKETS):
     # The API reports your remaining quota in a response "header" (extra info
     # that travels with the data).
     remaining = response.headers.get("x-requests-remaining")
-    return response.json(), remaining
+    games = response.json()
+
+    # Keep a copy of what we just paid for (raw file + database). This only
+    # reads the data we already have, so it costs no credits, and it never
+    # raises: a storage problem must not stop the digest. See storage.py.
+    save_snapshot(sport_key, games, raw_body=getattr(response, "content", None))
+
+    return games, remaining
 
 
 # Runs only when you start this file directly, not when imported.
