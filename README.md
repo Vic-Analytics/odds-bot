@@ -125,6 +125,8 @@ The tests simulate GitHub starting every run up to four hours late, in both seas
 | `check_emoji.py` | Free tool: lists teams in the schedule that have no emoji yet |
 | `telegram_bot.py` | Sends messages to Telegram |
 | `http_utils.py` | Web requests that retry on temporary failures |
+| `storage.py` | Saves every odds response: raw JSON archive + SQLite database |
+| `scripts/` | `backfill_from_raw.py` (rebuild the database) and an example SQL query |
 | `get_chat_id.py` | One-time helper to find your Telegram chat ID |
 | `tests/` | Automated tests (fake data only, no network) |
 | `.github/workflows/daily-odds.yml` | The schedule and cloud job |
@@ -150,6 +152,18 @@ python check_emoji.py            # free: which teams have no emoji yet
 python main.py --dry-run         # prints the digest (uses API credits)
 python main.py                   # sends the digest to Telegram
 ```
+
+## Odds history
+
+Every time the bot pulls odds from The Odds API, `storage.py` keeps a copy. It reads the response the bot already paid for, so it makes no extra API calls and costs no credits.
+
+- **Raw archive:** the untouched response, saved as `data/raw/YYYY-MM-DD/<sport_key>__HHMMSSZ.json` (UTC).
+- **Database:** `data/odds.db` (SQLite) with `events`, `odds`, `results` and `pulls` tables, plus a `pregame_odds` view that hides prices pulled after kickoff (those are live odds). Every price is stored with its sportsbook, market, line and the time it was pulled, so line movement and sportsbook comparisons are one query away. Re-saving the same pull never creates duplicates.
+- **Rebuildable:** the raw files are the source of truth. `python scripts/backfill_from_raw.py --rebuild` recreates the database from them, so the tables can change later without losing history.
+- **Safe:** a storage problem is logged and never stops the Telegram digest.
+- **Example:** `scripts/best_moneyline_today.sql` lists today's best moneyline per team across sportsbooks (`sqlite3 data/odds.db < scripts/best_moneyline_today.sql`).
+
+The `data/` folder is not committed to this repository. A bot run on GitHub's temporary machines would lose it, so the raw files are kept in a separate private repository. The `results` table is created but empty for now; final scores will be added from free sources.
 
 ## Tests
 
