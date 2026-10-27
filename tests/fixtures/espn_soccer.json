@@ -1,0 +1,35 @@
+{
+ "events": [
+  {
+   "id": "401882828",
+   "date": "2026-10-26T20:00Z",
+   "status": {
+    "type": {
+     "name": "STATUS_FULL_TIME",
+     "completed": true,
+     "detail": "FT"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Sevilla"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Osasuna"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

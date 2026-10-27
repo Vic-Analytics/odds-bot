@@ -1,0 +1,35 @@
+{
+ "events": [
+  {
+   "id": "401873009",
+   "date": "2026-10-27T00:15Z",
+   "status": {
+    "type": {
+     "name": "STATUS_FINAL",
+     "completed": true,
+     "detail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "21",
+       "team": {
+        "displayName": "Philadelphia Eagles"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "38",
+       "team": {
+        "displayName": "Dallas Cowboys"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

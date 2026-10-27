@@ -1,0 +1,69 @@
+# Saves yesterday's final scores (from free sources) into the private data repo.
+#
+# This is a separate job from the daily digest. It never touches the Odds API, so
+# it costs no credits: scores come from ESPN, statsapi.mlb.com and api-web.nhle.com.
+#
+# How it works:
+#   1. results.py --files-only fetches the last 2 days (so one skipped run is
+#      caught up the next day) and writes small files to data/results_raw/.
+#   2. scripts/publish_data.py copies the new files into the private
+#      odds-history-data repo (only adding, never overwriting).
+#   Matching a score to a game in the odds database happens later, on your
+#   computer, when you rebuild the database (scripts/backfill_from_raw.py).
+#
+# The schedule runs at 12:37 UTC (7:37 AM Central in summer, 6:37 AM in winter),
+# after the previous night's games are final. Off the top of the hour, because
+# GitHub is busiest at :00. If GitHub starts it late, nothing is lost.
+
+name: Daily results
+
+on:
+  schedule:
+    - cron: "37 12 * * *"
+  # Run it by hand from the Actions tab. "days" is how many days to look back
+  # (use a bigger number, like 7, to catch up after an outage).
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "How many days of scores to fetch (ending yesterday)"
+        default: "2"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-results
+  cancel-in-progress: false
+
+jobs:
+  fetch-results:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install requirements
+        run: pip install -r requirements.txt
+
+      - name: Fetch final scores
+        env:
+          DAYS: ${{ inputs.days || '2' }}
+        run: python results.py --files-only --days "$DAYS"
+
+      # Runs even if one league failed above, so the leagues that worked are
+      # still saved. A failure still turns the run red (and GitHub emails you).
+      - name: Save the scores to the private data repo
+        if: always() && hashFiles('data/results_raw/**/*.json') != ''
+        env:
+          DEPLOY_KEY: ${{ secrets.ODDS_DATA_DEPLOY_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/data_deploy_key
+          chmod 600 ~/.ssh/data_deploy_key
+          python scripts/publish_data.py --publish data/results_raw=results_raw --ssh-key ~/.ssh/data_deploy_key
