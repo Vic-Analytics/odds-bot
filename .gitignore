@@ -19,3 +19,6 @@ data/
 
 # Jupyter
 .ipynb_checkpoints/
+
+# The dashboard page contains licensed odds data: never commit it
+analysis/dashboard.html
