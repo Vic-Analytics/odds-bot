@@ -195,3 +195,113 @@ def test_fewer_than_three_books_are_not_compared():
 def test_books_per_game():
     rows = rows_for({"a": 1, "b": 2, "c": 3}, event="e1") + rows_for({"a": 1}, event="e2")
     assert stats.books_per_game(rows) == {"icehockey_nhl": 2.0}
+
+
+# ---------- margin (vig) ----------
+
+def two_sided(book, home, away, event="e1", sport="icehockey_nhl"):
+    return [(sport, event, book, "Rangers", home), (sport, event, book, "Kings", away)]
+
+
+def test_margin_is_how_far_the_chances_add_up_past_100():
+    rows = (two_sided("a", 150, -170) + two_sided("b", 140, -160) + two_sided("c", 130, -150))
+    result = stats.book_margins(rows)
+    # a: +150 is 40.00% and -170 is 62.96%, which add up to 102.96%: a margin of 2.96%
+    assert result[0]["book"] == "a"
+    assert result[0]["avg_margin"] == pytest.approx((0.4 + 170 / 270 - 1) * 100)
+    assert [r["book"] for r in result] == ["a", "b", "c"]          # lowest margin first
+    assert (result[0]["lowest"], result[1]["lowest"]) == (1.0, 0.0)
+
+
+def test_a_book_that_skipped_an_outcome_is_not_compared():
+    rows = (two_sided("a", 150, -170) + two_sided("b", 140, -160) + two_sided("c", 130, -150)
+            + [("icehockey_nhl", "e1", "d", "Rangers", 500)])      # d only priced one side: its "margin" would be nonsense
+    assert "d" not in [r["book"] for r in stats.book_margins(rows)]
+
+
+def test_margins_need_three_books_per_game():
+    assert stats.book_margins(two_sided("a", 150, -170) + two_sided("b", 140, -160)) == []
+
+
+# ---------- price age ----------
+
+def test_price_age_median_oldest_and_stale_share():
+    pulled = "2026-10-28T13:00:00Z"
+    rows = [("a", pulled, "2026-10-28T12:50:00Z"),      # 10 minutes old
+            ("a", pulled, "2026-10-28T10:00:00Z"),      # 180 minutes old
+            ("b", pulled, "2026-10-28T12:59:00Z"),      # 1 minute old
+            ("b", pulled, "2026-10-28T13:30:00Z"),      # "updated" after our pull (clock skew): age 0, not negative
+            ("c", pulled, None)]                        # no update time: ignored
+    result = stats.price_ages(rows)
+    assert [r["book"] for r in result] == ["a", "b"]    # the stalest book first, c has nothing to show
+    assert (result[0]["median"], result[0]["oldest"], result[0]["stale"]) == (95.0, 180.0, 0.5)
+    assert (result[1]["median"], result[1]["oldest"], result[1]["stale"]) == (0.5, 1.0, 0.0)
+
+
+# ---------- line movement ----------
+
+def snapshot(pulled, home, away, event="e1", sport="icehockey_nhl", draw=None, start="2026-10-27T00:00:00Z"):
+    rows = [(sport, event, start, pulled, "Rangers", "Kings", "Rangers", home),
+            (sport, event, start, pulled, "Rangers", "Kings", "Kings", away)]
+    if draw is not None:
+        rows.append((sport, event, start, pulled, "Rangers", "Kings", "Draw", draw))
+    return rows
+
+
+def test_line_move_removes_the_margin_and_finds_the_side_that_gained():
+    rows = snapshot("2026-10-26T13:00:00Z", 0.40, 0.62) + snapshot("2026-10-26T20:00:00Z", 0.45, 0.58)
+    move = stats.line_moves(rows)[0]
+    first, last = 0.40 / 1.02, 0.45 / 1.03                          # the first pull adds up to 102%, the last to 103%
+    assert (move["mover"], move["mover_team"], move["toward"]) == ("home", "Rangers", "home")
+    assert move["first"] == pytest.approx(first) and move["last"] == pytest.approx(last)
+    assert move["rise"] == pytest.approx(last - first)
+    assert move["size"] == pytest.approx(last - first)              # the other side fell by the same amount
+
+
+def test_line_move_with_a_draw_in_the_market():
+    rows = snapshot("2026-10-26T13:00:00Z", 0.40, 0.35, draw=0.30) + snapshot("2026-10-26T20:00:00Z", 0.45, 0.35, draw=0.30)
+    move = stats.line_moves(rows)[0]
+    assert move["first"] == pytest.approx(0.40 / 1.05) and move["last"] == pytest.approx(0.45 / 1.10)
+    assert move["size"] == pytest.approx(0.45 / 1.10 - 0.40 / 1.05)
+
+
+def test_pulls_too_close_together_or_a_single_pull_are_not_movement():
+    assert stats.line_moves(snapshot("2026-10-26T13:00:00Z", 0.4, 0.62)) == []
+    assert stats.line_moves(snapshot("2026-10-26T13:00:00Z", 0.4, 0.62) + snapshot("2026-10-26T14:30:00Z", 0.5, 0.52)) == []
+
+
+def test_a_small_wobble_does_not_count_as_moving_toward_a_side():
+    rows = snapshot("2026-10-26T13:00:00Z", 0.500, 0.520) + snapshot("2026-10-26T20:00:00Z", 0.505, 0.515)
+    move = stats.line_moves(rows)[0]
+    assert move["toward"] is None and move["rise"] < stats.MOVE_THRESHOLD
+
+
+def test_move_summary_checks_whether_the_side_moved_toward_won():
+    moves = stats.line_moves(snapshot("2026-10-26T13:00:00Z", 0.40, 0.62) + snapshot("2026-10-26T20:00:00Z", 0.45, 0.58))
+    won = stats.move_summary(moves, prep(game(event_id="e1", score=(3, 1))))[0]
+    assert (won["n"], won["moved"], won["decided"], won["actual"]) == (1, 1, 1, 1.0)
+    assert won["said"] == pytest.approx(0.45 / 1.03)                # the final odds' chance for the side that gained
+    assert won["avg_move"] == pytest.approx((0.45 / 1.03 - 0.40 / 1.02) * 100)
+    lost = stats.move_summary(moves, prep(game(event_id="e1", score=(0, 2))))[0]
+    assert lost["actual"] == 0.0
+    unfinished = stats.move_summary(moves, [])[0]
+    assert (unfinished["decided"], unfinished["actual"]) == (0, None)
+
+
+def test_biggest_moves_are_sorted_by_size():
+    rows = (snapshot("2026-10-26T13:00:00Z", 0.40, 0.62, event="small") + snapshot("2026-10-26T20:00:00Z", 0.42, 0.60, event="small")
+            + snapshot("2026-10-26T13:00:00Z", 0.40, 0.62, event="big") + snapshot("2026-10-26T20:00:00Z", 0.55, 0.47, event="big"))
+    assert [m["event_id"] for m in stats.biggest_moves(stats.line_moves(rows))] == ["big", "small"]
+
+
+# ---------- upsets ----------
+
+def test_biggest_upsets_sorted_by_the_winners_chance():
+    games = prep(
+        game(event_id="a", home_prob=0.60, away_prob=0.40, score=(1, 2)),     # the 40% side won
+        game(event_id="b", home_prob=0.30, away_prob=0.70, score=(3, 2)),     # the 30% side won: a bigger upset
+        game(event_id="c", home_prob=0.60, away_prob=0.40, score=(3, 2)),     # the favorite won: not an upset
+        game(event_id="d", home_prob=0.60, away_prob=0.40, score=(2, 2)))     # a draw: not an upset
+    upsets = stats.biggest_upsets(games)
+    assert [(u["event_id"], round(u["chance"], 2)) for u in upsets] == [("b", 0.30), ("a", 0.40)]
+    assert stats.biggest_upsets(games, limit=1)[0]["event_id"] == "b"
