@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "analysis"))
 import dashboard
 import storage
 from helpers import book, game, outcome
-from test_analysis_sql import conn  # noqa: F401  (the fixture: 3 NHL games + 1 NFL game, all finished)
+from test_analysis_sql import conn, nhl_game  # noqa: F401  (conn: the fixture with 3 NHL games + 1 NFL game, all finished)
 
 NOW = datetime(2026, 10, 26, 20, 0, tzinfo=timezone.utc)      # after the morning pull, before every game
 
@@ -132,3 +132,41 @@ def test_mma_is_not_reported_as_missing_scores():
 def test_empty_database_shows_a_message_in_every_new_section():
     storage.connect(storage.db_path()).close()
     assert page().count('class="empty"') >= 10
+
+
+def test_coming_up_shows_the_best_price_and_who_has_it(conn):
+    coming = section(page(), "Coming up (next 48 hours)")
+    # g1: Rangers +150 at A and +140 at B, Kings -170 at A and -160 at B
+    assert "<b>+150</b> (A)" in coming
+    assert "<b>-160</b> (B)" in coming            # -160 pays more than -170
+
+
+def test_coming_up_shows_a_draw_price_for_soccer(conn):
+    cup = game("Arsenal", "Liverpool", start="2026-10-27T01:00:00Z", game_id="s1", books=[
+        book(name, h2h=[outcome("Arsenal", 150), outcome("Liverpool", 190), outcome("Draw", 240 + i)])
+        for i, name in enumerate(("A", "B", "C"))])
+    storage.insert_snapshot(conn, "soccer_epl", [cup], "2026-10-26T13:00:00Z")
+    coming = section(page(), "Coming up (next 48 hours)")
+    assert "Draw</span>" in coming or "Draw <b>+242</b> (C)" in coming
+    assert "<b>+242</b> (C)" in coming
+
+
+def test_margin_and_freshness_sections_list_the_books(conn):
+    text = page()
+    margins = section(text, "Which sportsbook charges the least margin?")
+    assert "<td>A</td>" in margins and "<td>C</td>" in margins        # g2 and the NFL game were priced by A, B and C
+    assert "<td>A</td>" in section(text, "How fresh are the prices?")
+
+
+def test_line_movement_appears_once_a_game_has_two_pulls(conn):
+    assert "Needs a game pulled on two different mornings" in section(page(), "Line movement")
+    later = nhl_game("g1", "Rangers", "Kings", "2026-10-27T00:00:00Z", ([-150, -140], [130, 120]), [6.5, 6.5])
+    storage.insert_snapshot(conn, "icehockey_nhl", [later], "2026-10-26T18:00:00Z")      # 5 hours after the first pull
+    moves = section(page(), "Line movement")
+    assert "<h4>Biggest moves</h4>" in moves and "Rangers" in moves
+
+
+def test_biggest_upsets_section(conn):
+    upsets = section(page(), "Biggest upsets")
+    assert "Rangers" in upsets and "won with a" in upsets              # the home underdog beat the Kings
+    assert "Bruins" not in upsets                                      # the favorite winning is not an upset

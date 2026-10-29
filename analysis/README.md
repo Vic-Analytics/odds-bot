@@ -35,8 +35,8 @@ extra install:
 It has four parts. Every table shows a "too few games to trust" note until a row has 30 games,
 and tables fill in on their own as the history grows.
 
-- **Overview:** games coming up in the next 48 hours with the win chances the odds imply, and the last 20 results (favorite won or upset).
-- **Market quality:** do favorites win as often as the odds say (grouped by how strong the favorite was), which sportsbooks have the best and worst prices, and how much more a winning $100 bet pays at the best line than at an average book.
+- **Overview:** games coming up in the next 48 hours with the win chances the odds imply and the best price for each side (and which sportsbook has it), the last 20 results (favorite won or upset), and the biggest upsets.
+- **Market quality:** do favorites win as often as the odds say (grouped by how strong the favorite was), which sportsbooks have the best and worst prices, and how much more a winning $100 bet pays at the best line than at an average book. Also: which sportsbook charges the least margin (its "vig"), how fresh each book's prices were when pulled, and line movement (how far a game's consensus moved between its first and last pre-game pull, and whether the side it moved toward won more than the final odds said).
 - **League trends:** home advantage, home underdogs, over/under rates, point-spread coverage, soccer draw rate versus the draw odds, and back-to-back effects on winning and on totals.
 - **Data health:** per league, games stored, pulls, books per game, scores matched, and games that started 24+ hours ago with no score (a sign a team name needs an alias in `names.py`). Plus games tracked per day.
 
@@ -65,6 +65,8 @@ Open `starter_questions.ipynb` and run the cells.
 | `sql/game_lines.sql` | One row per finished game: consensus pre-game lines (moneyline probabilities, spread, total) plus the result and flags like `home_underdog` and `went_over`. Works in any SQLite tool too. |
 | `dashboard.py` | Builds `dashboard.html`, a one-page summary of the database (see above). |
 | `stats.py` | The calculations behind the dashboard, as plain functions (no database or HTML), each covered by tests with hand-checked numbers. |
+| `sql/line_moves.sql` | The consensus moneyline of every pre-game snapshot of each game, used to measure line movement. |
+| `sql/price_ages.sql` | The age of each sportsbook's price (time between its last update and our pull). |
 | `sql/book_prices.sql` | Every sportsbook's moneyline price from the newest pre-game snapshot of each game. |
 | `load.py` | Opens the database read-only and returns pandas tables: `game_lines()`, `rest_days()`, `with_rest_days()`. |
 | `starter_questions.ipynb` | The two example questions above, answered step by step. |

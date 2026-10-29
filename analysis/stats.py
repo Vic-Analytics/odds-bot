@@ -18,6 +18,7 @@ Two ideas used throughout:
 
 from collections import defaultdict
 from datetime import datetime
+from statistics import median
 from zoneinfo import ZoneInfo
 
 CENTRAL = ZoneInfo("America/Chicago")
@@ -300,6 +301,137 @@ def book_stats(rows):
                     "max_range": v["range_max"], "avg_gain": v["gain_sum"] / v["n"], "max_gain": v["gain_max"]}
                    for sport, v in sorted(leagues.items())]
     return book_rows, league_rows
+
+
+def book_margins(rows):
+    """Which sportsbook charges the least margin (the "vig")?
+
+    A sportsbook's margin on a game is how far its win chances add up past 100%: if the
+    chances on every outcome sum to 104%, it keeps about 4%. Lower is better for you.
+    Uses the same rows as book_stats. A book only counts for a game when it priced every
+    outcome, and the game needs at least MIN_BOOKS such books.
+    """
+    games = defaultdict(lambda: defaultdict(dict))
+    for sport, event, book, outcome, price in rows:
+        games[(sport, event)][book][outcome] = price
+    totals = defaultdict(lambda: {"games": 0, "margin": 0.0, "lowest": 0})
+    for books in games.values():
+        width = max(len(prices) for prices in books.values())
+        full = {book: sum(implied(p) for p in prices.values()) for book, prices in books.items() if len(prices) == width}
+        if len(full) < MIN_BOOKS:
+            continue
+        lowest = min(full.values())
+        for book, total in full.items():
+            entry = totals[book]
+            entry["games"] += 1
+            entry["margin"] += (total - 1) * 100
+            entry["lowest"] += total - lowest < 1e-9
+    rows = [{"book": book, "games": v["games"], "avg_margin": v["margin"] / v["games"],
+             "lowest": v["lowest"] / v["games"]} for book, v in totals.items()]
+    return sorted(rows, key=lambda r: (r["avg_margin"], r["book"]))
+
+
+# ---------- how old the prices are ----------
+
+STALE_MINUTES = 60
+
+
+def parse_utc(iso):
+    return datetime.fromisoformat(iso.replace("Z", "+00:00"))
+
+
+def price_ages(rows):
+    """6. How old were each sportsbook's prices when we pulled them?
+
+    `rows` is (bookmaker, pulled_at, last_update). Age is the minutes between the
+    sportsbook last changing the price and our pull. Stalest books first.
+    """
+    ages = defaultdict(list)
+    for book, pulled, updated in rows:
+        if pulled and updated:
+            ages[book].append(max(0.0, (parse_utc(pulled) - parse_utc(updated)).total_seconds() / 60))
+    result = [{"book": book, "n": len(values), "median": median(values), "oldest": max(values),
+               "stale": rate(sum(v > STALE_MINUTES for v in values), len(values))} for book, values in ages.items()]
+    return sorted(result, key=lambda r: (-r["median"], r["book"]))
+
+
+# ---------- line movement ----------
+
+MIN_MOVE_HOURS = 2         # two pulls closer together than this are not a real movement
+MOVE_THRESHOLD = 0.01      # a side "gained" only if its chance rose by at least 1 point
+
+
+def _chances(by_outcome, home, away):
+    """Home and away chances of one snapshot with the margin removed (None if a side is missing)."""
+    if home not in by_outcome or away not in by_outcome:
+        return None
+    total = by_outcome[home] + by_outcome[away] + by_outcome.get("Draw", 0.0)
+    return {"home": by_outcome[home] / total, "away": by_outcome[away] / total}
+
+
+def line_moves(rows):
+    """1. How did each game's moneyline move between its first and its last pre-game pull?
+
+    `rows` is (sport_key, event_id, commence_time, pulled_at, home_team, away_team, outcome, prob),
+    one per outcome of every pre-game snapshot. Only games pulled at least MIN_MOVE_HOURS apart
+    count. Returns one dict per game: the side whose chance rose the most (`mover`), how much
+    (`rise`, as a fraction), the biggest change either side had (`size`), and `toward` = that
+    side when it rose by at least MOVE_THRESHOLD, else None.
+    """
+    snapshots = defaultdict(lambda: defaultdict(dict))
+    meta = {}
+    for sport, event, commence, pulled, home, away, outcome, prob in rows:
+        snapshots[event][pulled][outcome] = prob
+        meta[event] = (sport, commence, home, away)
+    moves = []
+    for event, by_time in snapshots.items():
+        times = sorted(by_time)
+        if len(times) < 2 or (parse_utc(times[-1]) - parse_utc(times[0])).total_seconds() < MIN_MOVE_HOURS * 3600:
+            continue
+        sport, commence, home, away = meta[event]
+        first, last = _chances(by_time[times[0]], home, away), _chances(by_time[times[-1]], home, away)
+        if not first or not last:
+            continue
+        rises = {side: last[side] - first[side] for side in ("home", "away")}
+        mover = max(rises, key=rises.get)
+        moves.append({"event_id": event, "sport_key": sport, "commence_time": commence, "home_team": home,
+                      "away_team": away, "mover": mover, "mover_team": home if mover == "home" else away,
+                      "rise": rises[mover], "size": max(abs(v) for v in rises.values()),
+                      "toward": mover if rises[mover] >= MOVE_THRESHOLD else None,
+                      "first": first[mover], "last": last[mover], "last_chances": last})
+    return moves
+
+
+def move_summary(moves, games):
+    """Per league: how far lines move, and whether the side the market moved toward won more than the odds said."""
+    finished = {g["event_id"]: g for g in games}
+    per_league = defaultdict(list)
+    for move in moves:
+        per_league[move["sport_key"]].append(move)
+    rows = []
+    for sport, items in sorted(per_league.items()):
+        decided = [(m, finished[m["event_id"]]) for m in items if m["toward"] and m["event_id"] in finished]
+        rows.append({"sport_key": sport, "n": len(items),
+                     "avg_move": mean(m["size"] for m in items) * 100, "biggest": max(m["size"] for m in items) * 100,
+                     "moved": sum(1 for m in items if m["toward"]), "decided": len(decided),
+                     "said": mean(m["last_chances"][m["toward"]] for m, _ in decided),
+                     "actual": rate(sum(g["winner"] == m["toward"] for m, g in decided), len(decided))})
+    return rows
+
+
+def biggest_moves(moves, limit=8):
+    return sorted(moves, key=lambda m: -m["size"])[:limit]
+
+
+# ---------- upsets ----------
+
+def biggest_upsets(games, limit=10):
+    """3. The finished games where the side the odds gave the smallest chance won."""
+    upsets = []
+    for g in games:
+        if g["winner"] in ("home", "away") and g["winner"] != g["favorite"]:
+            upsets.append(dict(g, chance=g["p_" + g["winner"]]))
+    return sorted(upsets, key=lambda u: (u["chance"], u["commence_time"]))[:limit]
 
 
 def books_per_game(rows):
