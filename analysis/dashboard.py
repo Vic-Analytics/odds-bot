@@ -92,9 +92,12 @@ def upcoming(conn, now, hours):
         totals = [r[4] for r in rows.get((event_id, "totals"), []) if r[4] is not None]
         spreads = [r[4] for r in rows.get((event_id, "spreads"), []) if r[2] == home and r[4] is not None]
         most_common = lambda values: max(set(values), key=lambda v: (values.count(v), -abs(v))) if values else None
+        best = {}                                    # outcome -> (best American price, sportsbook)
+        for r in sorted(h2h, key=lambda r: (-r[3], r[5])):
+            best.setdefault(r[2], (r[3], r[5]))
         out.append({"sport_key": sport_key, "start": to_central(commence), "home": home, "away": away,
                     "home_prob": avg.get(home), "away_prob": avg.get(away), "draw_prob": avg.get("Draw"),
-                    "total": most_common(totals), "spread": most_common(spreads),
+                    "total": most_common(totals), "spread": most_common(spreads), "best": best,
                     "books": len({r[5] for r in h2h})})
     return out
 
@@ -112,6 +115,14 @@ def finished(conn):
 def book_prices(conn):
     """(sport_key, event_id, bookmaker, outcome, price) from the newest pre-game moneyline of every game."""
     return conn.execute((HERE / "sql" / "book_prices.sql").read_text(encoding="utf-8")).fetchall()
+
+
+def line_move_rows(conn):
+    return conn.execute((HERE / "sql" / "line_moves.sql").read_text(encoding="utf-8")).fetchall()
+
+
+def price_age_rows(conn):
+    return conn.execute((HERE / "sql" / "price_ages.sql").read_text(encoding="utf-8")).fetchall()
 
 
 def all_events(conn):
@@ -179,17 +190,21 @@ def upcoming_table(games):
         chances += f' · Draw {pct(g["draw_prob"])}' if soccer else ""
         chances += f' · {label(g["sport_key"], g["home"])} {pct(g["home_prob"])}'
         total_text = "–" if g["total"] is None else format(g["total"], "g")
+        order = [g["away"]] + (["Draw"] if soccer else []) + [g["home"]]
+        best_lines = [f'{label(g["sport_key"], name)} <b>{g["best"][name][0]:+d}</b> ({book_name(g["best"][name][1])})'
+                      for name in order if name in g["best"]]
         body.append(
             f'<tr><td>{esc(g["start"].strftime("%a %I:%M %p").replace(" 0", " "))}</td>'
             f'<td>{esc(sport_name(g["sport_key"]))}</td>'
             f'<td>{label(g["sport_key"], g["away"])} @ {label(g["sport_key"], g["home"])}</td>'
             f'<td>{chances}</td>'
+            f'<td>{"<br>".join(best_lines) or "–"}</td>'
             f'<td class="n">{num(g["spread"])}</td>'
             f'<td class="n">{total_text}</td>'
             f'<td class="n">{g["books"]}</td></tr>')
     return ('<div class="scroll"><table><thead><tr><th>Start (Central)</th><th>League</th><th>Game</th>'
-            '<th>Win chance the odds imply</th><th class="n">Home spread</th><th class="n">Total</th>'
-            '<th class="n">Books</th></tr></thead><tbody>' + "".join(body) + "</tbody></table></div>")
+            '<th>Win chance the odds imply</th><th>Best price (sportsbook)</th><th class="n">Home spread</th>'
+            '<th class="n">Total</th><th class="n">Books</th></tr></thead><tbody>' + "".join(body) + "</tbody></table></div>")
 
 
 def table(columns, rows, empty="Nothing to show yet."):
@@ -297,6 +312,56 @@ def shopping_html(rows):
         [[league(r["sport_key"]), r["n"], decimals(r["avg_range"]) + " pts", decimals(r["max_range"]) + " pts",
           dollars(r["avg_gain"]), dollars(r["max_gain"]), small(r["n"])] for r in rows],
         "Needs a game priced by at least 3 sportsbooks.")
+
+
+def margins_html(rows):
+    return table(
+        [("Sportsbook", False), ("Games", True), ("Average margin", True), ("Had the lowest margin", True), ("", False)],
+        [[book_name(r["book"]), r["games"], f'{r["avg_margin"]:.1f}%', pct(r["lowest"]), small(r["games"])] for r in rows],
+        "Needs a game priced by at least 3 sportsbooks.")
+
+
+def age_text(minutes):
+    return f"{minutes:.0f} min" if minutes < 120 else f"{minutes / 60:.1f} hours"
+
+
+def ages_html(rows):
+    return table(
+        [("Sportsbook", False), ("Prices", True), ("Typical age", True), ("Older than 1 hour", True),
+         ("Oldest", True), ("", False)],
+        [[book_name(r["book"]), r["n"], age_text(r["median"]), pct(r["stale"]), age_text(r["oldest"]), small(r["n"])]
+         for r in rows],
+        "Needs odds pulls that include the sportsbooks' last-update times.")
+
+
+def movement_html(summary, biggest):
+    out = table(
+        [("League", False), ("Games with 2+ pulls", True), ("Average move", True), ("Biggest move", True),
+         ("Moved 1+ point", True), ("Finished", True), ("Odds said (final)", True), ("Side it moved toward won", True), ("", False)],
+        [[league(r["sport_key"]), r["n"], decimals(r["avg_move"]) + " pts", decimals(r["biggest"]) + " pts", r["moved"],
+          r["decided"], pct(r["said"]), pct(r["actual"]), small(r["decided"])] for r in summary],
+        "Needs a game pulled on two different mornings (at least 2 hours apart) before kickoff.")
+    if biggest:
+        out += "<h4>Biggest moves</h4>" + table(
+            [("Start (Central)", False), ("League", False), ("Game", False), ("Side that gained", False),
+             ("Chance, first pull to last", True), ("Change", True)],
+            [[esc(to_central(m["commence_time"]).strftime("%b %d")), esc(sport_name(m["sport_key"])),
+              f'{label(m["sport_key"], m["away_team"])} @ {label(m["sport_key"], m["home_team"])}',
+              label(m["sport_key"], m["mover_team"]), f'{pct(m["first"])} → {pct(m["last"])}',
+              f'{m["rise"] * 100:+.1f} pts'] for m in biggest])
+    return out
+
+
+def upsets_html(upsets):
+    rows = []
+    for g in upsets:
+        key = g["sport_key"]
+        winner, loser = (g["home_team"], g["away_team"]) if g["winner"] == "home" else (g["away_team"], g["home_team"])
+        rows.append([esc(to_central(g["commence_time"]).strftime("%b %d")), esc(sport_name(key)),
+                     f'{label(key, g["away_team"])} {g["away_score"]} – {g["home_score"]} {label(key, g["home_team"])}',
+                     f'{label(key, winner)} won with a {pct(g["chance"])} chance', label(key, loser)])
+    return table([("Date", False), ("League", False), ("Final score", False), ("Winner", False),
+                  ("Favorite (lost)", False)], rows, "No upsets yet, or no finished games.")
 
 
 def health_html(rows, books_per):
@@ -435,6 +500,8 @@ def build(db_path, hours, now=None):
         coming = upcoming(conn, now, hours)
         done = stats.prepare(finished(conn))
         prices = book_prices(conn)
+        moves = stats.line_moves(line_move_rows(conn))
+        ages = stats.price_ages(price_age_rows(conn))
         events = all_events(conn)
         health_rows = health(conn, now)
         chart = bar_chart(games_per_day(conn, today))
@@ -458,6 +525,9 @@ def build(db_path, hours, now=None):
 <section><h3>Recent results</h3>
 <p class="note">The last 20 finished games, compared with what the morning odds expected.</p>
 {results_table(done)}</section>
+<section><h3>Biggest upsets</h3>
+<p class="note">The finished games where the side the odds gave the smallest chance won. Draws are not counted.</p>
+{upsets_html(stats.biggest_upsets(done))}</section>
 
 <h2 class="group" id="market">Market quality</h2>
 <p class="lead">“Odds said” is the win chance the odds imply with the sportsbooks' margin taken out, so the chances add up to 100%. If the odds are good, what happened should land close to what they said, once there are enough games.</p>
@@ -470,6 +540,15 @@ def build(db_path, hours, now=None):
 <section><h3>What is shopping for the best line worth?</h3>
 <p class="note">How far apart the books were, and how much more a winning $100 bet pays at the best price than at the average book.</p>
 {shopping_html(shopping_rows)}</section>
+<section><h3>Which sportsbook charges the least margin?</h3>
+<p class="note">A sportsbook's margin (its “vig”) is how far its win chances add up past 100%. A lower margin means better prices for you on both sides of the game. A book only counts for a game when it priced every outcome.</p>
+{margins_html(stats.book_margins(prices))}</section>
+<section><h3>How fresh are the prices?</h3>
+<p class="note">How long before our pull each sportsbook last changed its price. Books with old prices may not really pay what they showed, so their “best price” can already be gone.</p>
+{ages_html(ages)}</section>
+<section><h3>Line movement</h3>
+<p class="note">How the consensus win chance changed between a game's first and last pre-game pull (at least 2 hours apart). “Moved toward” means a side's chance rose by 1 point or more. If markets are sharp, the side the money moved toward should win about as often as the final odds say.</p>
+{movement_html(stats.move_summary(moves, done), stats.biggest_moves(moves))}</section>
 
 <h2 class="group" id="trends">League trends</h2>
 <p class="lead">Each table needs a lot of games before it means anything, so it shows a warning until a row has {SMALL_SAMPLE}.</p>
