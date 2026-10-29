@@ -27,11 +27,12 @@ sys.path.insert(0, str(HERE.parent))      # so we can reuse the bot's names and 
 
 from names import SPORT_NAME_BY_KEY       # noqa: E402
 from team_emoji import team_label         # noqa: E402
+import stats                              # noqa: E402
+from stats import SMALL_SAMPLE, implied  # noqa: E402
 
 CENTRAL = ZoneInfo("America/Chicago")
 DEFAULT_DB = HERE.parent / "data" / "odds.db"
 DEFAULT_OUT = HERE / "dashboard.html"
-SMALL_SAMPLE = 30      # below this many games, a percentage is mostly luck
 
 
 # ---------- reading the database ----------
@@ -41,11 +42,6 @@ def connect(db_path):
     if not path.exists():
         raise SystemExit(f"{path} not found. Build it first (see analysis/README.md, step 1).")
     return sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
-
-
-def implied(price):
-    """American odds -> the win chance they imply (0 to 1)."""
-    return 100.0 / (price + 100.0) if price > 0 else -price / (-price + 100.0)
 
 
 def sport_name(key):
@@ -113,6 +109,32 @@ def finished(conn):
         conn.row_factory = None
 
 
+def book_prices(conn):
+    """(sport_key, event_id, bookmaker, outcome, price) from the newest pre-game moneyline of every game."""
+    return conn.execute((HERE / "sql" / "book_prices.sql").read_text(encoding="utf-8")).fetchall()
+
+
+def all_events(conn):
+    return conn.execute("SELECT event_id, sport_key, commence_time, home_team, away_team FROM events").fetchall()
+
+
+def health(conn, now):
+    """Per league: games stored, scores matched, games that started 24h+ ago with no score, pulls, last pull."""
+    cutoff = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    pulls = {key: (n, last) for key, n, last in conn.execute(
+        "SELECT sport_key, COUNT(*), MAX(pulled_at) FROM pulls GROUP BY sport_key")}
+    rows = []
+    for key, games, scored, missing in conn.execute(
+            "SELECT e.sport_key, COUNT(*), COALESCE(SUM(r.completed = 1), 0), "
+            "COALESCE(SUM(e.commence_time < ? AND COALESCE(r.completed, 0) = 0), 0) "
+            "FROM events e LEFT JOIN results r ON r.event_id = e.event_id GROUP BY e.sport_key ORDER BY e.sport_key",
+            (cutoff,)):
+        n_pulls, last = pulls.get(key, (0, None))
+        rows.append({"sport_key": key, "games": games, "scored": scored, "missing": missing,
+                     "pulls": n_pulls, "last_pull": last})
+    return rows
+
+
 def games_per_day(conn, today, days=14):
     first = today - timedelta(days=days - 1)
     per_day = defaultdict(int)
@@ -170,57 +192,189 @@ def upcoming_table(games):
             '<th class="n">Books</th></tr></thead><tbody>' + "".join(body) + "</tbody></table></div>")
 
 
-def outcome_text(g):
-    hs, as_ = g["home_score"], g["away_score"]
-    if hs == as_:
-        return "Tie"
-    home_won = hs > as_
-    p_home, p_away = g["home_prob"], g["away_prob"]
-    favorite_home = p_home >= p_away
-    return "Favorite won" if home_won == favorite_home else "Upset"
-
-
-def results_table(rows, limit=20):
-    rows = sorted(rows, key=lambda r: r["commence_time"], reverse=True)[:limit]
+def table(columns, rows, empty="Nothing to show yet."):
+    """columns: [(heading, is_number)]; rows: lists of ready-made HTML cells."""
     if not rows:
-        return '<p class="empty">No finished games matched yet. Scores arrive the morning after each game.</p>'
+        return '<p class="empty">' + esc(empty) + "</p>"
+    head = "".join(f'<th class="n">{esc(h)}</th>' if is_num else f"<th>{esc(h)}</th>" for h, is_num in columns)
     body = []
-    for g in rows:
+    for cells in rows:
+        body.append("<tr>" + "".join(
+            f'<td class="n">{cell}</td>' if is_num else f"<td>{cell}</td>"
+            for (_, is_num), cell in zip(columns, cells)) + "</tr>")
+    return '<div class="scroll"><table><thead><tr>' + head + "</tr></thead><tbody>" + "".join(body) + "</tbody></table></div>"
+
+
+def small(n):
+    """A reminder next to any percentage built from too few games."""
+    return '<span class="muted">too few games to trust</span>' if n < SMALL_SAMPLE else ""
+
+
+def league(key):
+    return "All leagues" if key is None else esc(sport_name(key))
+
+
+def points(value):
+    """A signed gap in win-chance points, e.g. +1.5 or -0.8."""
+    return "–" if value is None else f"{value:+.1f}"
+
+
+def dollars(value):
+    return "–" if value is None else f"${value:.2f}"
+
+
+def decimals(value):
+    return "–" if value is None else f"{value:.1f}"
+
+
+BOOK_NAMES = {
+    "draftkings": "DraftKings", "fanduel": "FanDuel", "betmgm": "BetMGM", "williamhill_us": "Caesars",
+    "betrivers": "BetRivers", "bovada": "Bovada", "mybookieag": "MyBookie.ag", "betonlineag": "BetOnline.ag",
+    "lowvig": "LowVig.ag", "fanatics": "Fanatics", "espnbet": "ESPN BET", "hardrockbet": "Hard Rock Bet",
+    "ballybet": "Bally Bet", "betparx": "betPARX", "pointsbetus": "PointsBet", "wynnbet": "WynnBET",
+    "unibet_us": "Unibet", "superbook": "SuperBook", "fliff": "Fliff", "betus": "BetUS",
+}
+
+
+def book_name(key):
+    return esc(BOOK_NAMES.get(key, key.replace("_", " ").title()))
+
+
+# ---------- recent results ----------
+
+def result_text(g):
+    if g["winner"] == "draw":
+        return "Draw" if g["sport_key"].startswith("soccer_") else "Tie"
+    return "Favorite won" if g["winner"] == g["favorite"] else "Upset"
+
+
+def results_table(games, limit=20):
+    recent = sorted(games, key=lambda g: g["commence_time"], reverse=True)[:limit]
+    rows = []
+    for g in recent:
         key = g["sport_key"]
-        favorite_home = g["home_prob"] >= g["away_prob"]
-        fav = g["home_team"] if favorite_home else g["away_team"]
-        fav_prob = g["home_prob"] if favorite_home else g["away_prob"]
+        favorite = g["home_team"] if g["favorite"] == "home" else g["away_team"]
         plain = g["status"] in (None, "FINAL", "FULL_TIME")
         status_note = "" if plain else " <span class='muted'>(" + esc(g["status"]) + ")</span>"
-        body.append(
-            f'<tr><td>{esc(to_central(g["commence_time"]).strftime("%b %d"))}</td>'
-            f'<td>{esc(sport_name(key))}</td>'
-            f'<td>{label(key, g["away_team"])} {g["away_score"]} – {g["home_score"]} {label(key, g["home_team"])}'
-            f'{status_note}</td>'
-            f'<td>{label(key, fav)} {pct(fav_prob)}</td><td>{outcome_text(g)}</td></tr>')
-    return ('<div class="scroll"><table><thead><tr><th>Date</th><th>League</th><th>Final score</th>'
-            '<th>Favorite (by the odds)</th><th>Result</th></tr></thead><tbody>' + "".join(body) + "</tbody></table></div>")
+        rows.append([
+            esc(to_central(g["commence_time"]).strftime("%b %d")), esc(sport_name(key)),
+            f'{label(key, g["away_team"])} {g["away_score"]} – {g["home_score"]} {label(key, g["home_team"])}{status_note}',
+            f'{label(key, favorite)} {pct(g["fav_prob"])}', result_text(g)])
+    return table([("Date", False), ("League", False), ("Final score", False),
+                  ("Favorite (by the odds)", False), ("Result", False)], rows,
+                 "No finished games matched yet. Scores arrive the morning after each game.")
+
+
+# ---------- market quality ----------
+
+def calibration_html(rows):
+    pooled = [r for r in rows if r["sport_key"] is None]
+    per_league = [r for r in rows if r["sport_key"] is not None]
+    head = [("Favorite's chance", False), ("Games", True), ("Odds said", True), ("Favorite won", True), ("", False)]
+    html_out = "<h4>All leagues together</h4>" + table(head, [[esc(r["bucket"]), r["n"], pct(r["said"]), pct(r["actual"]), small(r["n"])] for r in pooled],
+                     "Nothing to show until games finish.")
+    if per_league:
+        html_out += ("<details><summary>By league</summary>" + table(
+            [("League", False)] + head,
+            [[league(r["sport_key"]), esc(r["bucket"]), r["n"], pct(r["said"]), pct(r["actual"]), small(r["n"])]
+             for r in per_league]) + "</details>")
+    return html_out
+
+
+def books_html(rows):
+    return table(
+        [("Sportsbook", False), ("Prices compared", True), ("Had the best price", True),
+         ("Had the worst price", True), ("Average vs other books", True), ("", False)],
+        [[book_name(r["book"]), r["quotes"], pct(r["best"]), pct(r["worst"]), points(r["gap"]) + " pts", small(r["quotes"])]
+         for r in rows],
+        "Needs a game priced by at least 3 sportsbooks.")
+
+
+def shopping_html(rows):
+    return table(
+        [("League", False), ("Prices compared", True), ("Avg gap, best to worst book", True),
+         ("Biggest gap", True), ("Extra win per $100, best vs average book", True), ("Biggest extra win", True), ("", False)],
+        [[league(r["sport_key"]), r["n"], decimals(r["avg_range"]) + " pts", decimals(r["max_range"]) + " pts",
+          dollars(r["avg_gain"]), dollars(r["max_gain"]), small(r["n"])] for r in rows],
+        "Needs a game priced by at least 3 sportsbooks.")
+
+
+def health_html(rows, books_per):
+    body = []
+    for r in rows:
+        key = r["sport_key"]
+        no_source = key.startswith("mma_")
+        if no_source:
+            missing = '<span class="muted">no score source</span>'
+        elif r["missing"]:
+            missing = f'{r["missing"]} <span class="muted">check team names (names.py)</span>'
+        else:
+            missing = "0"
+        last = to_central(r["last_pull"]).strftime("%b %d %I:%M %p").replace(" 0", " ") if r["last_pull"] else "–"
+        body.append([esc(sport_name(key)), r["games"], r["pulls"], esc(last), decimals(books_per.get(key)),
+                     r["scored"], missing])
+    return table([("League", False), ("Games stored", True), ("Pulls", True), ("Last pull (Central)", True),
+                  ("Books per game", True), ("Scores matched", True), ("Started 24h+ ago, no score", True)],
+                 body, "No data yet.")
+
+
+# ---------- league trends ----------
+
+def home_advantage_html(rows):
+    return table(
+        [("League", False), ("Games", True), ("Odds said: home wins", True), ("Home won", True), ("Away won", True),
+         ("Draw or tie", True), ("", False)],
+        [[league(r["sport_key"]), r["n"], pct(r["said"]), pct(r["home"]), pct(r["away"]), pct(r["draw"]), small(r["n"])]
+         for r in rows], "Nothing to show until games finish.")
 
 
 def home_dog_table(rows):
-    by_sport = defaultdict(list)
-    for g in rows:
-        by_sport[g["sport_key"]].append(g)
-    if not by_sport:
-        return '<p class="empty">Nothing to show until games finish.</p>'
-    body = []
-    for key, games in sorted(by_sport.items(), key=lambda kv: -len(kv[1])):
-        dogs = [g for g in games if g["home_underdog"] == 1]
-        wins = sum(g["home_won"] for g in dogs)
-        expected = sum(g["home_prob"] for g in dogs) / len(dogs) if dogs else None
-        actual = wins / len(dogs) if dogs else None
-        note = "too few games to trust" if len(dogs) < SMALL_SAMPLE else ""
-        body.append(f'<tr><td>{esc(sport_name(key))}</td><td class="n">{len(games)}</td><td class="n">{len(dogs)}</td>'
-                    f'<td class="n">{wins}</td><td class="n">{pct(expected)}</td><td class="n">{pct(actual)}</td>'
-                    f'<td class="muted">{note}</td></tr>')
-    return ('<div class="scroll"><table><thead><tr><th>League</th><th class="n">Finished games</th>'
-            '<th class="n">Home underdogs</th><th class="n">Won</th><th class="n">Odds said</th>'
-            '<th class="n">Actually won</th><th></th></tr></thead><tbody>' + "".join(body) + "</tbody></table></div>")
+    return table(
+        [("League", False), ("Finished games", True), ("Home underdogs", True), ("Won", True),
+         ("Odds said", True), ("Actually won", True), ("", False)],
+        [[league(r["sport_key"]), r["games"], r["dogs"], r["wins"], pct(r["said"]), pct(r["actual"]), small(r["dogs"])]
+         for r in rows], "Nothing to show until games finish.")
+
+
+def totals_html(rows):
+    return table(
+        [("League", False), ("Games", True), ("Average line", True), ("Average real total", True), ("Went over", True),
+         ("Went under", True), ("Pushed", True), ("Over rate", True), ("", False)],
+        [[league(r["sport_key"]), r["n"], decimals(r["avg_line"]), decimals(r["avg_total"]), r["over"], r["under"],
+          r["push"], pct(r["over_rate"]), small(r["n"])] for r in rows],
+        "Needs finished games that had an over/under line.")
+
+
+def spreads_html(rows):
+    return table(
+        [("League", False), ("Games", True), ("Favorite covered", True), ("Underdog covered", True), ("Pushed", True),
+         ("Favorite cover rate", True), ("Home cover rate", True), ("", False)],
+        [[league(r["sport_key"]), r["n"], r["fav"], r["dog"], r["push"], pct(r["fav_rate"]), pct(r["home_rate"]),
+          small(r["n"])] for r in rows],
+        "Needs finished games that had a point spread (NFL, NBA, WNBA).")
+
+
+def draws_html(rows):
+    def gap(r):
+        return "–" if r["said"] is None or r["actual"] is None else f'{(r["actual"] - r["said"]) * 100:+.1f} pts'
+    return table(
+        [("League", False), ("Games", True), ("Odds said: draw", True), ("Actually drew", True), ("Difference", True), ("", False)],
+        [[league(r["sport_key"]), r["n"], pct(r["said"]), pct(r["actual"]), gap(r), small(r["n"])] for r in rows],
+        "Needs finished soccer games.")
+
+
+def rest_html(effect_rows, totals_rows):
+    out = "<h4>Do teams on a back-to-back win less than the odds expect?</h4>" + table(
+        [("League", False), ("Situation", False), ("Team games", True), ("Odds said", True), ("Actually won", True), ("", False)],
+        [[league(r["sport_key"]), esc(r["situation"]), r["n"], pct(r["said"]), pct(r["actual"]), small(r["n"])]
+         for r in effect_rows],
+        "Needs a team that played two days in a row inside the data.")
+    out += "<h4>Do totals go over more when a team is on a back-to-back?</h4>" + table(
+        [("League", False), ("Situation", False), ("Games", True), ("Over rate", True), ("Real total minus line", True), ("", False)],
+        [[league(r["sport_key"]), esc(r["situation"]), r["n"], pct(r["over_rate"]),
+          "–" if r["avg_vs_line"] is None else f'{r["avg_vs_line"]:+.1f}', small(r["n"])] for r in totals_rows],
+        "Needs a team that played two days in a row inside the data.")
+    return out
 
 
 def bar_chart(series):
@@ -255,7 +409,9 @@ CSS = """
 @media (prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#121211;--surface:#1a1a19;--ink:#f0efec;--ink2:#c3c2b7;--muted:#a09f96;--line:#33332f;--accent:#3987e5}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:1000px;margin:0 auto;padding:24px 16px 48px}
-h1{font-size:24px;margin:0 0 2px}h2{font-size:17px;margin:0 0 4px}.sub{color:var(--ink2);margin:0 0 20px}
+h1{font-size:24px;margin:0 0 2px}h2.group{font-size:20px;margin:32px 0 0}h3{font-size:17px;margin:0 0 4px}h4{font-size:14px;margin:16px 0 6px;color:var(--ink2)}
+.sub{color:var(--ink2);margin:0 0 12px}.lead{color:var(--ink2);font-size:14px;margin:4px 0 0}
+.nav{display:flex;gap:16px;flex-wrap:wrap;margin:0 0 16px;font-size:14px}a{color:var(--accent)}
 section{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;margin:16px 0}
 section p.note{color:var(--ink2);font-size:13px;margin:0 0 12px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0}
@@ -277,8 +433,14 @@ def build(db_path, hours, now=None):
     with closing(connect(db_path)) as conn:
         c = counts(conn)
         coming = upcoming(conn, now, hours)
-        done = finished(conn)
+        done = stats.prepare(finished(conn))
+        prices = book_prices(conn)
+        events = all_events(conn)
+        health_rows = health(conn, now)
         chart = bar_chart(games_per_day(conn, today))
+
+    gaps = stats.rest_gaps(events)
+    book_rows, shopping_rows = stats.book_stats(prices)
     first = to_central(c["first"]).strftime("%b %d") if c["first"] else "–"
     last = to_central(c["last"]).strftime("%b %d, %I:%M %p").replace(" 0", " ") if c["last"] else "–"
     tiles = "".join([tile(c["games"], "games tracked"), tile(c["with_results"], "with a final score"),
@@ -288,17 +450,54 @@ def build(db_path, hours, now=None):
 <title>Odds Bot Dashboard</title><style>{CSS}</style></head><body><main>
 <h1>Odds Bot dashboard</h1>
 <p class="sub">Latest odds pull: {esc(last)} Central. Built {esc(now.astimezone(CENTRAL).strftime("%b %d, %I:%M %p").replace(" 0", " "))} Central.</p>
+<nav class="nav"><a href="#market">Market quality</a><a href="#trends">League trends</a><a href="#health">Data health</a></nav>
 <div class="tiles">{tiles}</div>
-<section><h2>Coming up (next {hours} hours)</h2>
+<section><h3>Coming up (next {hours} hours)</h3>
 <p class="note">Morning prices from the newest pre-game pull, averaged across sportsbooks. “Win chance” still includes the sportsbooks' margin.</p>
 {upcoming_table(coming)}</section>
-<section><h2>Recent results</h2>
+<section><h3>Recent results</h3>
 <p class="note">The last 20 finished games, compared with what the morning odds expected.</p>
 {results_table(done)}</section>
-<section><h2>Home underdogs</h2>
-<p class="note">How often the home team won when the odds rated it the underdog. With fewer than {SMALL_SAMPLE} games, a percentage is mostly luck.</p>
-{home_dog_table(done)}</section>
-<section><h2>Games tracked per day</h2>
+
+<h2 class="group" id="market">Market quality</h2>
+<p class="lead">“Odds said” is the win chance the odds imply with the sportsbooks' margin taken out, so the chances add up to 100%. If the odds are good, what happened should land close to what they said, once there are enough games.</p>
+<section><h3>Do favorites win as often as the odds say?</h3>
+<p class="note">Games grouped by how strong the favorite was. A draw counts as the favorite not winning.</p>
+{calibration_html(stats.calibration(done))}</section>
+<section><h3>Which sportsbooks pay the most?</h3>
+<p class="note">On each game's moneyline, who had the best and worst price (only when prices differed and at least 3 books quoted it). “Average vs other books” is in win-chance points: negative means it pays more than the typical book, positive means less.</p>
+{books_html(book_rows)}</section>
+<section><h3>What is shopping for the best line worth?</h3>
+<p class="note">How far apart the books were, and how much more a winning $100 bet pays at the best price than at the average book.</p>
+{shopping_html(shopping_rows)}</section>
+
+<h2 class="group" id="trends">League trends</h2>
+<p class="lead">Each table needs a lot of games before it means anything, so it shows a warning until a row has {SMALL_SAMPLE}.</p>
+<section><h3>Home advantage</h3>
+<p class="note">How often the home team wins, compared with what the odds said.</p>
+{home_advantage_html(stats.home_advantage(done))}</section>
+<section><h3>Home underdogs</h3>
+<p class="note">How often the home team won when the odds rated it the underdog.</p>
+{home_dog_table(stats.home_underdogs(done))}</section>
+<section><h3>Over / under</h3>
+<p class="note">How often games go over the line, and how close the real total lands to it. Soccer games that went to extra time are left out, because the line covers 90 minutes.</p>
+{totals_html(stats.totals(done))}</section>
+<section><h3>Point spreads</h3>
+<p class="note">How often the favorite, the underdog and the home team beat the spread. A push means the margin landed exactly on it.</p>
+{spreads_html(stats.spreads(done))}</section>
+<section><h3>Soccer draws</h3>
+<p class="note">How often a game was level after 90 minutes, compared with the draw chance in the odds.</p>
+{draws_html(stats.draws(done))}</section>
+<section><h3>Rest and back-to-backs</h3>
+<p class="note">“Back-to-back” means the team's previous game in the database was the day before (Central time). The first games in the database have no earlier game to compare with, so they are left out.</p>
+{rest_html(stats.rest_effect(done, gaps), stats.rest_totals(done, gaps))}</section>
+
+<h2 class="group" id="health">Data health</h2>
+<p class="lead">Checks that the bot is collecting everything it should.</p>
+<section><h3>Coverage by league</h3>
+<p class="note">A game that started more than 24 hours ago with no score usually means a team name needs an alias in names.py, then rebuild the database.</p>
+{health_html(health_rows, stats.books_per_game(prices))}</section>
+<section><h3>Games tracked per day</h3>
 <p class="note">By start date (Central), last 14 days. This shows how fast your history is growing.</p>
 {chart}</section>
 <footer>Generated by analysis/dashboard.py from data/odds.db. Contains licensed odds data: do not publish.</footer>

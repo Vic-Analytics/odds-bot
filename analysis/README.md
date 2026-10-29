@@ -32,10 +32,20 @@ extra install:
 .\.venv\Scripts\python.exe analysis\dashboard.py --open
 ```
 
-It shows: games coming up in the next 48 hours with the win chances the odds imply, the
-last 20 results (and whether the favorite won), how often home underdogs won, and how many
-games the bot tracked each day. Run it again after refreshing the data. The page contains
-your odds data, so it is ignored by git: never commit or share it.
+It has four parts. Every table shows a "too few games to trust" note until a row has 30 games,
+and tables fill in on their own as the history grows.
+
+- **Overview:** games coming up in the next 48 hours with the win chances the odds imply, and the last 20 results (favorite won or upset).
+- **Market quality:** do favorites win as often as the odds say (grouped by how strong the favorite was), which sportsbooks have the best and worst prices, and how much more a winning $100 bet pays at the best line than at an average book.
+- **League trends:** home advantage, home underdogs, over/under rates, point-spread coverage, soccer draw rate versus the draw odds, and back-to-back effects on winning and on totals.
+- **Data health:** per league, games stored, pulls, books per game, scores matched, and games that started 24+ hours ago with no score (a sign a team name needs an alias in `names.py`). Plus games tracked per day.
+
+"Odds said" always means the win chance the odds imply with the sportsbooks' margin removed, so the
+chances add up to 100%. Soccer odds cover the first 90 minutes, so a game that went to extra time counts
+as a draw and is left out of the totals and spread tables.
+
+Run it again after refreshing the data. The page contains your odds data, so it is ignored by git: never
+commit or share it.
 
 ## 2. Set up the notebook tools (once)
 
@@ -54,6 +64,8 @@ Open `starter_questions.ipynb` and run the cells.
 |---|---|
 | `sql/game_lines.sql` | One row per finished game: consensus pre-game lines (moneyline probabilities, spread, total) plus the result and flags like `home_underdog` and `went_over`. Works in any SQLite tool too. |
 | `dashboard.py` | Builds `dashboard.html`, a one-page summary of the database (see above). |
+| `stats.py` | The calculations behind the dashboard, as plain functions (no database or HTML), each covered by tests with hand-checked numbers. |
+| `sql/book_prices.sql` | Every sportsbook's moneyline price from the newest pre-game snapshot of each game. |
 | `load.py` | Opens the database read-only and returns pandas tables: `game_lines()`, `rest_days()`, `with_rest_days()`. |
 | `starter_questions.ipynb` | The two example questions above, answered step by step. |
 
