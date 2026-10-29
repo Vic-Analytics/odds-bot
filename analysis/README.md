@@ -23,7 +23,21 @@ git clone https://github.com/Vic-Analytics/odds-history-data.git ..\odds-history
 Run `git pull` in that folder and the same command again whenever you want fresher
 data. It is safe to repeat: nothing is duplicated.
 
-## 2. Set up the analysis tools (once)
+## The dashboard (quickest way to look)
+
+After step 1, one command builds a web page and opens it in your browser. It needs no
+extra install:
+
+```powershell
+.\.venv\Scripts\python.exe analysis\dashboard.py --open
+```
+
+It shows: games coming up in the next 48 hours with the win chances the odds imply, the
+last 20 results (and whether the favorite won), how often home underdogs won, and how many
+games the bot tracked each day. Run it again after refreshing the data. The page contains
+your odds data, so it is ignored by git: never commit or share it.
+
+## 2. Set up the notebook tools (once)
 
 ```powershell
 python -m venv analysis\.venv
@@ -39,6 +53,7 @@ Open `starter_questions.ipynb` and run the cells.
 | File | What it is |
 |---|---|
 | `sql/game_lines.sql` | One row per finished game: consensus pre-game lines (moneyline probabilities, spread, total) plus the result and flags like `home_underdog` and `went_over`. Works in any SQLite tool too. |
+| `dashboard.py` | Builds `dashboard.html`, a one-page summary of the database (see above). |
 | `load.py` | Opens the database read-only and returns pandas tables: `game_lines()`, `rest_days()`, `with_rest_days()`. |
 | `starter_questions.ipynb` | The two example questions above, answered step by step. |
 
