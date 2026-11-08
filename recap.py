@@ -260,8 +260,14 @@ def evaluate(data_dir, day, now=None, fetch=None, no_wait=False):
 
     if not games:
         day_over = now.date() > day
-        outcome.update(done=day_over, reason=f"no games with odds and a score source on {day}"
-                       + ("" if day_over else " (yet), will look again"))
+        if not (Path(data_dir) / "raw" / day.isoformat()).is_dir():
+            # The morning digest saves its odds in a folder named for the day. No folder means the data we were
+            # given is out of date (a clone that needs updating) or that day's digest never ran.
+            reason = (f"no odds have been saved for {day}: there is no raw/{day} folder in {data_dir}. "
+                      f"If this is your own copy of the data repo, update it first (run: git pull inside that folder)")
+        else:
+            reason = f"no games with odds and a score source on {day}" + ("" if day_over else " (yet), will look again")
+        outcome.update(done=day_over, reason=reason)
         return outcome
     if state["pending"] and not no_wait:
         latest = max(state["pending"], key=lambda g: g["start"])
