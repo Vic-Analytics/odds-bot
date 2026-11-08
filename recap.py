@@ -39,16 +39,24 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE / "analysis"))        # stats.py: plain Python, no pandas needed
 
-import results  # noqa: E402
-import stats  # noqa: E402
-import storage  # noqa: E402
-import telegram_bot  # noqa: E402
-from central_time import CENTRAL, day_bounds, to_central  # noqa: E402
-from config import SPORT_EMOJI, SPORTS  # noqa: E402
-from format_digest import MAX_MESSAGE_LENGTH, plain_preview  # noqa: E402
-from names import SPORT_NAME_BY_KEY  # noqa: E402
-from recap_gate import recap_day  # noqa: E402
-from team_emoji import team_label  # noqa: E402
+try:
+    import results  # noqa: E402
+    import stats  # noqa: E402
+    import storage  # noqa: E402
+    import telegram_bot  # noqa: E402
+    from central_time import CENTRAL, day_bounds, to_central  # noqa: E402
+    from config import SPORT_EMOJI, SPORTS  # noqa: E402
+    from format_digest import MAX_MESSAGE_LENGTH, plain_preview  # noqa: E402
+    from names import SPORT_NAME_BY_KEY  # noqa: E402
+    from recap_gate import recap_day  # noqa: E402
+    from team_emoji import team_label  # noqa: E402
+except ModuleNotFoundError as error:
+    # The libraries live in the project's own virtual environment (.venv). Running with the
+    # computer's general Python, which does not have them, is the usual cause.
+    raise SystemExit(
+        f"The Python library '{error.name}' is missing, which usually means this was run with the wrong Python.\n"
+        f"Run it with the project's own Python instead, from the C:\\OddsBot folder:\n"
+        f"    .\\.venv\\Scripts\\python.exe recap.py {' '.join(sys.argv[1:])}".rstrip())
 
 GAME_LINES_SQL = (HERE / "analysis" / "sql" / "game_lines.sql").read_text(encoding="utf-8")
 
