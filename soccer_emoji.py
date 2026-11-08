@@ -227,6 +227,21 @@ SOCCER_ALIASES.update({
     "FSV Mainz 05": "Mainz 05",
 })
 
+# Premier League and Bundesliga clubs that had no kit colors yet (they showed a plain
+# soccer ball). Claret counts as brown, like Aston Villa above.
+SOCCER_EMOJI.update({
+    "West Ham United": "🟤🔵", "Burnley": "🟤🔵", "Wolverhampton Wanderers": "🟠⚫",
+    "1. FC Heidenheim": "🔴🔵", "VfL Wolfsburg": "🟢⚪", "FC St. Pauli": "🟤⚪",
+})
+SOCCER_ALIASES.update({
+    "West Ham": "West Ham United",
+    "Wolves": "Wolverhampton Wanderers",
+    "Wolverhampton": "Wolverhampton Wanderers",
+    "Heidenheim": "1. FC Heidenheim",
+    "Wolfsburg": "VfL Wolfsburg",
+    "St Pauli": "FC St. Pauli",
+})
+
 _DROP = {"fc", "cf", "afc", "sc", "sv", "club", "de", "the"}
 
 def _norm(name: str) -> str:
