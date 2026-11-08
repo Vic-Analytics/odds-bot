@@ -258,30 +258,7 @@ def test_backfill_script_runs_from_any_folder(tmp_path):
         assert conn.execute("SELECT COUNT(*) FROM odds").fetchone()[0] == 8
 
 
-# ---------- the example query ----------
-
-def test_best_moneyline_query_picks_the_best_price_per_team_and_ignores_live_odds():
-    sql_file = ROOT / "scripts" / "best_moneyline_today.sql"
-    sql = sql_file.read_text(encoding="utf-8")
-
-    # "Today" is Oct 29 Central: the game starts 23:30 UTC = 6:30 PM CDT.
-    assert "date('now', '-5 hours')" in sql
-    sql = sql.replace("date('now', '-5 hours')", "'2026-10-29'")
-
-    storage.save_snapshot(SPORT, response(start="2026-10-29T23:30:00Z"), pulled_at=PULL1)
-    # A later live snapshot with wild prices must be ignored.
-    live = response(start="2026-10-29T23:30:00Z", dk_home=-900)
-    live[0]["bookmakers"][1]["markets"][0]["outcomes"][1]["price"] = 5000
-    storage.save_snapshot(SPORT, live, pulled_at="2026-10-30T00:00:00Z")
-
-    with closing(sqlite3.connect(storage.db_path())) as conn:
-        rows = conn.execute(sql).fetchall()
-    assert [(r[4], r[5], r[6]) for r in rows] == [
-        ("Colorado Avalanche", -165, "fanduel"),      # -165 beats -170
-        ("Pittsburgh Penguins", 150, "draftkings"),   # +150 beats +145
-    ]
-    assert rows[0][1] == "2026-10-29 18:30:00"        # shown in Central time
-
+# (The "best moneyline today" query is tested in test_best_moneyline.py.)
 
 # ---------- upgrading an older database ----------
 
