@@ -137,6 +137,25 @@ def test_a_day_with_no_games_sends_nothing_and_is_only_closed_once_the_day_is_ov
     assert after["messages"] == [] and after["done"] is True
 
 
+def test_a_data_folder_without_that_days_odds_says_to_update_it(tmp_path):
+    """A stale clone of the data repo has older days only. Saying "no games (yet)" would hide the real problem."""
+    (tmp_path / "raw" / "2026-10-28").mkdir(parents=True)
+    outcome_ = recap.evaluate(tmp_path, DAY, NOW_LATE, fetch=scores())
+    assert "no odds have been saved for 2026-11-08" in outcome_["reason"] and "git pull" in outcome_["reason"]
+    assert outcome_["messages"] == [] and outcome_["done"] is False
+    closed = recap.evaluate(tmp_path, DAY, at("2026-11-09T20:00:00"), fetch=scores())     # the day is over: stop checking
+    assert closed["done"] is True
+
+
+def test_a_day_that_has_a_folder_but_no_games_keeps_the_ordinary_message(tmp_path):
+    folder = tmp_path / "raw" / "2026-11-08"
+    folder.mkdir(parents=True)
+    (folder / "icehockey_nhl__140000Z.json").write_text("[]", encoding="utf-8")       # the digest ran: just no games
+    outcome_ = recap.evaluate(tmp_path, DAY, NOW_LATE, fetch=scores())
+    assert "no games with odds and a score source on 2026-11-08" in outcome_["reason"]
+    assert "git pull" not in outcome_["reason"]
+
+
 def test_fighting_games_have_no_free_score_source_and_never_hold_the_recap_up(day_of_games):
     save_odds("mma_mixed_martial_arts", [market("Islam Makhachev", "Charles Oliveira", NBA_1, [-300, -290], [250, 240],
                                                 "f1", "mma_mixed_martial_arts")])
