@@ -42,6 +42,17 @@ Soccer also shows the over/under on goals, and clubs get kit-color dots:
 
 *(Illustrative numbers. Real messages use bold headlines and Telegram quote blocks, which is what the vertical bar represents here.)*
 
+## Dashboard demo
+
+![The analysis dashboard, built from fake data](docs/screenshot.png)
+
+**[Open the live demo](https://vic-analytics.github.io/odds-bot/)**: the analysis dashboard (see "Analysis") built from **synthetic data**. The league and team names are real, but every price, line and score is randomly generated. The page is marked "DEMO: fake data" and never contains my real odds history, which stays in a private repo.
+
+- **How the fake data is made:** `analysis/demo_data.py` gives every team a hidden strength, prices each game at 6 to 10 sportsbooks (each with its own margin and its own small disagreements, and the occasional stale price), prices every game twice so the market "moves", and draws the scores from the same strengths. It uses its own tiny random number generator, so the same seed gives the same page on every computer.
+- **Tests prove it is synthetic:** the generator imports nothing that can reach the network or the data folder, a test builds it with both blocked, every game id and source is marked as demo data, and the page must contain the banner. Another test fails if the committed `docs/index.html` is out of date.
+- **Regenerate it:** `.\.venv\Scripts\python.exe scripts\make_demo.py` writes `docs/index.html`.
+- **Published with GitHub Pages**, serving the `docs/` folder of the `main` branch.
+
 ## Features
 
 - **Best line across all books.** For each game it finds the highest moneyline price per team. For spreads and totals it takes the most common line, then the best price at that number, so a rare odd alternate line can't look like a bargain.
@@ -70,6 +81,53 @@ The Odds API's free tier gives 500 credits a month, and each market in each requ
 A busy month with all 15 leagues comes to roughly 315 credits by my estimate.
 
 ## How it works
+
+The whole system at a glance:
+
+```mermaid
+flowchart LR
+    subgraph sources["Data sources"]
+        oddsapi[("The Odds API")]
+        scoresapi[("ESPN, MLB, NHL<br/>free score APIs")]
+    end
+
+    subgraph cloud["GitHub Actions (free)"]
+        digest["Daily digest<br/>hourly, 7 AM-2 PM window"]
+        results["Results job<br/>every morning"]
+        recap["Results recap<br/>every 20 min, 6 PM-10 AM"]
+    end
+
+    subgraph store["Private repo"]
+        data[("odds-history-data<br/>raw odds and scores")]
+    end
+
+    subgraph out["Delivery and alarm"]
+        telegram(["Telegram"])
+        hc["healthchecks.io"]
+    end
+
+    subgraph mine["On my computer"]
+        db[("odds.db")] --> dashboard["Dashboard page"]
+    end
+
+    subgraph demo["Public demo"]
+        gen["Fake-data generator"] --> demopage["docs/index.html<br/>GitHub Pages"]
+    end
+
+    oddsapi -->|odds| digest
+    scoresapi -->|final scores| results
+    scoresapi -->|final scores| recap
+    digest -->|raw odds| data
+    results -->|scores| data
+    data -->|that day's odds| recap
+    digest -->|digest| telegram
+    recap -->|recap| telegram
+    digest -->|ping after sending| hc
+    hc -->|alert if no ping by 9 AM| telegram
+    data -->|git pull and backfill| db
+```
+
+The daily digest in more detail:
 
 ```
 GitHub Actions (cron: every hour at :15, 12:15-19:15 UTC)
@@ -175,14 +233,15 @@ Favorite: 🏔️ Colorado Avalanche 61% · ✅ Favorite won
 | `recap_gate.py` | Decides whether a recap run is inside the 6 PM to 10 AM window, and which day it is for |
 | `central_time.py` | Central-time helpers (the day's UTC bounds, daylight saving included) |
 | `names.py` | Decides whether two team names from different sources are the same team |
-| `scripts/` | `backfill_from_raw.py` (rebuild the database), `publish_data.py` (save raw files to the private data repo), `ping_healthcheck.py` (the missed-digest alarm ping) and `best_moneyline_today.py` (an example query) |
+| `scripts/` | `make_demo.py` (build the fake-data demo page), `backfill_from_raw.py` (rebuild the database), `publish_data.py` (save raw files to the private data repo), `ping_healthcheck.py` (the missed-digest alarm ping) and `best_moneyline_today.py` (an example query) |
 | `get_chat_id.py` | One-time helper to find your Telegram chat ID |
 | `tests/` | Automated tests (fake data only, no network) |
 | `.github/workflows/daily-odds.yml` | The schedule and cloud job |
 | `.github/workflows/results.yml` | Daily job that saves final scores to the private data repo |
 | `.github/workflows/recap.yml` | Every 20 minutes in the evening: sends the recap when the last game has finished |
 | `.github/workflows/tests.yml` | Runs the tests on every push and pull request |
-| `analysis/` | Read-only analysis tools: SQL, a loader and a starter notebook (own requirements) |
+| `analysis/` | Read-only analysis tools: the dashboard, its calculations (`stats.py`), SQL, a loader, a starter notebook and the fake-data generator (`demo_data.py`) |
+| `docs/` | The public demo page (`index.html`, built from fake data) and its screenshot |
 
 ## Run it locally
 
