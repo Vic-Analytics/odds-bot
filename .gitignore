@@ -22,3 +22,6 @@ data/
 
 # The dashboard page contains licensed odds data: never commit it
 analysis/dashboard.html
+
+# The cloud recap job downloads the private data repo here: never commit it
+data-repo/

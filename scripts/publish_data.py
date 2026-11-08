@@ -6,6 +6,7 @@ This script is how the files it saved (data/raw/... and later
 data/results_raw/...) get into a permanent home: a separate PRIVATE repo.
 
     python scripts/publish_data.py --publish data/raw=raw --ssh-key ~/.ssh/key
+    python scripts/publish_data.py --clone data-repo --ssh-key ~/.ssh/key      (download it, for the recap)
 
 Each --publish takes SOURCE_FOLDER=FOLDER_IN_THE_DATA_REPO. Rules:
   * Only .json files are copied.
@@ -43,6 +44,24 @@ def run_git(args, cwd, env):
     return result.stdout.strip()
 
 
+def git_env(ssh_key=None):
+    """The environment for git commands: never ask for a password, and use the deploy key if given."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    if ssh_key:
+        env["GIT_SSH_COMMAND"] = (
+            f'ssh -i "{ssh_key}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes'
+        )
+    return env
+
+
+def clone(destination, repo_url=DEFAULT_REPO, ssh_key=None):
+    """Download the latest version of the data repo (no history) into `destination`. Read-only use."""
+    destination = Path(destination)
+    if destination.exists() and any(destination.iterdir()):
+        raise RuntimeError(f"{destination} already exists and is not empty")
+    run_git(["clone", "--quiet", "--depth", "1", repo_url, str(destination)], destination.parent, git_env(ssh_key))
+
+
 def new_files(pairs, repo_dir):
     """The (source file, destination file) pairs that are not in the data repo yet."""
     todo = []
@@ -63,11 +82,7 @@ def publish(pairs, repo_url=DEFAULT_REPO, ssh_key=None, attempts=3, before_push=
     pairs        list of (source_folder, folder_in_data_repo)
     before_push  for the tests only: called right before each push
     """
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
-    if ssh_key:
-        env["GIT_SSH_COMMAND"] = (
-            f'ssh -i "{ssh_key}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o BatchMode=yes'
-        )
+    env = git_env(ssh_key)
 
     with tempfile.TemporaryDirectory() as temp:
         repo = Path(temp) / "data-repo"
@@ -103,11 +118,25 @@ def publish(pairs, repo_url=DEFAULT_REPO, ssh_key=None, attempts=3, before_push=
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Copy new data files into the private data repo.")
-    parser.add_argument("--publish", action="append", required=True, metavar="SOURCE=DEST",
+    parser.add_argument("--publish", action="append", metavar="SOURCE=DEST",
                         help="source folder and the folder to put it in inside the data repo")
+    parser.add_argument("--clone", metavar="FOLDER", help="download the data repo into this (empty or new) folder instead")
     parser.add_argument("--repo-url", default=os.environ.get("ODDS_DATA_REPO", DEFAULT_REPO))
     parser.add_argument("--ssh-key", default=None, help="path to the deploy key (private half)")
     args = parser.parse_args(argv)
+
+    if args.clone:
+        if args.publish:
+            raise SystemExit("Use either --clone or --publish, not both.")
+        try:
+            clone(args.clone, args.repo_url, args.ssh_key)
+        except RuntimeError as error:
+            print(f"clone failed: {error}", file=sys.stderr)
+            return 1
+        print(f"Downloaded the data repo into {args.clone}.")
+        return 0
+    if not args.publish:
+        raise SystemExit("Nothing to do: give --publish SOURCE=DEST or --clone FOLDER.")
 
     pairs = []
     for item in args.publish:

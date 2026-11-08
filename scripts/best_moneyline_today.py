@@ -15,31 +15,17 @@ import argparse
 import sqlite3
 import sys
 from contextlib import closing
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import storage  # noqa: E402
+from central_time import CENTRAL, day_bounds  # noqa: E402
 from names import SPORT_NAME_BY_KEY  # noqa: E402
 
-CENTRAL = ZoneInfo("America/Chicago")
 SQL = (ROOT / "scripts" / "best_moneyline_today.sql").read_text(encoding="utf-8")
-
-
-def day_bounds(day):
-    """The UTC start and end of a Central calendar day, as the strings stored in the database.
-
-    A day that daylight saving changes is 23 or 25 hours long, which is why this is
-    computed from the time zone database and not as "start + 24 hours".
-    """
-    def utc(moment):
-        return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    start = datetime.combine(day, time.min, tzinfo=CENTRAL)
-    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=CENTRAL)
-    return utc(start), utc(end)
 
 
 def best_lines(conn, day):
