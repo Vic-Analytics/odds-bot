@@ -36,6 +36,54 @@ def test_the_key_is_written_with_private_permissions():
     assert "chmod 600 ~/.ssh/data_deploy_key" in WORKFLOW
 
 
+# ---------- the missed-digest alarm (healthchecks.io ping) ----------
+
+PING_STEP = "- name: Tell healthchecks.io the digest was delivered"
+
+
+def ping_block():
+    start = position(PING_STEP)
+    end = position("# 6.")
+    return WORKFLOW[start:end]
+
+
+def test_the_ping_comes_right_after_the_digest_and_before_saving_data():
+    assert position("- name: Send the digest") < position(PING_STEP) < position("- name: Save the raw odds to the private data repo")
+
+
+def test_the_digest_step_has_an_id_so_manual_runs_can_check_that_it_succeeded():
+    send = WORKFLOW[position("- name: Send the digest"):position(PING_STEP)]
+    assert "id: send" in send
+
+
+def test_the_ping_can_neither_fail_the_run_nor_hang_it():
+    block = ping_block()
+    assert "continue-on-error: true" in block
+    assert "timeout-minutes: 1" in block
+
+
+def test_the_ping_only_happens_after_a_digest_was_delivered():
+    block = ping_block()
+    assert "if: always()" in block                                  # also after a partly failed digest
+    assert "steps.gate.outputs.go == 'true'" in block               # never on runs outside the send window
+    assert "steps.already.outputs.cache-hit != 'true'" in block     # an earlier run already pinged today
+    assert "hashFiles('sent.marker') != ''" in block                # scheduled run: the digest wrote its marker
+    assert "github.event_name == 'workflow_dispatch' && steps.send.outcome == 'success'" in block   # manual run
+
+
+def test_the_ping_url_is_a_secret_used_in_one_place_and_never_pasted_into_the_command():
+    assert WORKFLOW.count("secrets.HEALTHCHECK_PING_URL") == 1
+    block = ping_block()
+    assert "HEALTHCHECK_PING_URL: ${{ secrets.HEALTHCHECK_PING_URL }}" in block
+    run_line = next(line for line in block.splitlines() if line.strip().startswith("run:"))
+    assert "${{" not in run_line and run_line.strip() == "run: python scripts/ping_healthcheck.py"
+
+
+def test_the_digest_steps_do_not_depend_on_the_alarm():
+    assert "healthcheck" not in WORKFLOW[:position("# 5b.")].lower()      # nothing before the ping step mentions it
+    assert "needs:" not in WORKFLOW
+
+
 # ---------- the daily results workflow ----------
 
 RESULTS = (Path(__file__).parent.parent / ".github" / "workflows" / "results.yml").read_text(encoding="utf-8")
