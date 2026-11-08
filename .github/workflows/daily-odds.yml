@@ -74,12 +74,32 @@ jobs:
       #    where our code looks for them. On scheduled runs, main.py also writes
       #    sent.marker once the digest is delivered.
       - name: Send the digest
+        id: send
         if: steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true'
         run: python main.py ${{ github.event_name == 'schedule' && '--marker-file sent.marker' || '' }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+
+      # 5b. The missed-digest alarm (see "Missed-digest alarm" in the README).
+      #     Right after the digest is delivered, ping healthchecks.io. If that
+      #     service does not hear from us by the deadline you set, IT sends you
+      #     an alert, from outside GitHub, so it works even when GitHub is down
+      #     or this schedule is switched off.
+      #     The ping happens after the digest, so it cannot delay or stop it,
+      #     and it cannot fail the run: a missing secret, a slow service or an
+      #     error is ignored (3 tries of at most 10 seconds; 1 minute at most).
+      #     "Delivered" means the marker file exists (scheduled runs) or a manual
+      #     run's digest step succeeded. If every sport failed there is no
+      #     marker, so there is no ping, and the next hourly run tries again.
+      - name: Tell healthchecks.io the digest was delivered
+        if: always() && steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true' && (hashFiles('sent.marker') != '' || (github.event_name == 'workflow_dispatch' && steps.send.outcome == 'success'))
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          HEALTHCHECK_PING_URL: ${{ secrets.HEALTHCHECK_PING_URL }}
+        run: python scripts/ping_healthcheck.py
 
       # 6. Keep the odds the bot just pulled. The runner is wiped after this job,
       #    so the raw files from data/raw are copied into a separate PRIVATE
