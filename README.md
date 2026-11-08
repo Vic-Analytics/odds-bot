@@ -105,18 +105,19 @@ The tests simulate GitHub starting every run up to four hours late, in both seas
 
 ### Missed-digest alarm
 
-If no digest arrives, I want to hear about it from something that does not depend on the thing that broke. So right after the digest is delivered, a workflow step pings [healthchecks.io](https://healthchecks.io), a free heartbeat service. If its daily ping has not arrived by the deadline (11:30 AM Central), **it** sends me an alert.
+If no digest arrives, I want to hear about it from something that does not depend on the thing that broke. So right after the digest is delivered, a workflow step pings [healthchecks.io](https://healthchecks.io), a free heartbeat service. If its daily ping has not arrived by the deadline (9:00 AM Central), **it** sends me an alert.
 
 - **Why outside GitHub:** a second GitHub workflow would share GitHub's failure modes. If GitHub is down, the schedule is switched off (GitHub does that after 60 days without repository activity) or the Telegram token is revoked, such a check goes silent too. healthchecks.io alerts through its own channel in all of those cases.
 - **It cannot hurt the digest:** the ping runs after the digest is sent, tries at most 3 times for 10 seconds each, can never fail the run, and does nothing if the secret is missing (`scripts/ping_healthcheck.py`). The service only receives "a ping happened at this time", no data.
 - **One-time setup** (about 10 minutes, all in a browser):
   1. Sign up at healthchecks.io (free).
-  2. Create a check. Set the schedule to the cron expression `0 7 * * *`, the time zone to `America/Chicago`, and the grace time to 4 hours 30 minutes. It then alerts at 11:30 AM Central and follows daylight saving by itself. To move the deadline, change the grace time.
+  2. Create a check. Set the schedule to the cron expression `0 7 * * *`, the time zone to `America/Chicago`, and the grace time to 2 hours. It then alerts at 9:00 AM Central and follows daylight saving by itself. To move the deadline, change the grace time (see "Choosing the deadline" below).
   3. Under **Integrations**, add **Telegram** and press Start in the bot it opens. Alerts will come from that bot, not from the odds bot.
   4. Copy the check's **ping URL** (it looks like `https://hc-ping.com/…`).
   5. In this repo go to Settings, Secrets and variables, Actions, New repository secret. Name it `HEALTHCHECK_PING_URL` and paste the URL. Treat it like a password: anyone with it can send a fake ping.
   6. Test it: Actions, Daily odds digest, Run workflow. The check on healthchecks.io should turn green within a minute. (A manual run sends a real digest and uses credits, like any manual run.)
 - **A late digest still counts if it lands before the deadline.** One that arrives after it triggers an alert; the digest is still sent when it runs.
+- **Choosing the deadline:** the alert should come soon after the digest was due, but not so soon that a late run triggers a false alarm. Since the hourly schedule was added (Oct 27), the digest has started sending between 7:00 and 7:30 AM Central in winter and around 8:10 AM in summer (the send window opens at 7 AM Central, and GitHub starts runs late). 9:00 AM leaves a margin in both seasons. 8:30 AM is tighter: it works in winter but would have been only about 20 minutes after a normal summer digest. healthchecks.io has one fixed time, so it cannot follow the seasons; change the grace time (1 hour is 8:00 AM, 1.5 hours is 8:30 AM) if you prefer a different trade-off.
 
 ### Results recap
 
@@ -136,10 +137,12 @@ Favorite: 🏔️ Colorado Avalanche 61% · ✅ Favorite won
 - **Try it safely on your computer** (nothing is sent, no credits are used; it needs a clone of the data repo, see "Analysis"):
 
   ```
-  python recap.py --dry-run --data-dir ..\odds-history-data              today's recap, or "waiting: 3 of 12 games not final yet"
-  python recap.py --dry-run --data-dir ..\odds-history-data --no-wait    what is final right now
-  python recap.py --dry-run --data-dir ..\odds-history-data --date 2026-11-07
+  .\.venv\Scripts\python.exe recap.py --dry-run --data-dir ..\odds-history-data              today's recap, or "waiting: 3 of 12 games not final yet"
+  .\.venv\Scripts\python.exe recap.py --dry-run --data-dir ..\odds-history-data --no-wait    what is final right now
+  .\.venv\Scripts\python.exe recap.py --dry-run --data-dir ..\odds-history-data --date 2026-11-07
   ```
+
+  Run these from the project folder with the project's own Python, as above. A plain `python` is your computer's general Python and does not have the libraries (the error is `No module named 'dotenv'`).
 
   In the cloud, Actions, Results recap, Run workflow sends a recap right away for whatever is final.
 

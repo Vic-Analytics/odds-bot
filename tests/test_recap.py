@@ -1,6 +1,9 @@
 """Tests for the results recap. Fake odds and fake score sources: no network, no credits."""
 
+import subprocess
+import sys
 from datetime import date, datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -314,3 +317,13 @@ def test_a_telegram_failure_exits_with_1_hides_the_token_and_leaves_no_marker(cl
 def test_a_bad_date_is_rejected():
     with pytest.raises(SystemExit, match="2026-11-08"):
         recap.main(["--date", "yesterday"])
+
+
+def test_the_wrong_python_gives_a_friendly_message_instead_of_a_traceback():
+    """Running with a Python that lacks the project's libraries (not the .venv one) is an easy mistake."""
+    code = ("import sys, runpy; sys.modules['dotenv'] = None; sys.argv = ['recap.py', '--dry-run']; "
+            "runpy.run_path('recap.py', run_name='__main__')")
+    result = subprocess.run([sys.executable, "-c", code], cwd=Path(__file__).parent.parent, capture_output=True, text=True)
+    assert result.returncode != 0 and "Traceback" not in result.stderr
+    assert "'dotenv' is missing" in result.stderr
+    assert r".\.venv\Scripts\python.exe recap.py --dry-run" in result.stderr
