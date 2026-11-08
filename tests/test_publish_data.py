@@ -1,6 +1,7 @@
 """Tests for publishing data files to the private repo, using a local stand-in repo."""
 
 import importlib.util
+import os
 import subprocess
 from pathlib import Path
 
@@ -126,3 +127,45 @@ def test_the_command_line_reports_failure_with_exit_code_1(local_data, tmp_path,
     code = publish_data.main(["--publish", f"{local_data}=raw", "--repo-url", str(tmp_path / "nope.git")])
     assert code == 1
     assert "publish failed" in capsys.readouterr().err
+
+
+# ---------- downloading the data repo (for the results recap) ----------
+
+def test_clone_downloads_the_data_and_makes_no_commit(remote, local_data, tmp_path):
+    publish_data.publish([(local_data, "raw")], str(remote))
+    before = commit_count(clone(remote, tmp_path, "before"))
+    destination = tmp_path / "downloaded"
+    publish_data.clone(destination, str(remote))
+    assert (destination / "raw" / "2026-10-28" / "icehockey_nhl__134855Z.json").exists()
+    assert commit_count(destination) == before
+    assert commit_count(clone(remote, tmp_path, "after")) == before                # nothing was pushed
+
+
+def test_clone_refuses_a_folder_that_already_has_files(remote, tmp_path):
+    destination = tmp_path / "busy"
+    destination.mkdir()
+    (destination / "keep.txt").write_text("mine")
+    with pytest.raises(RuntimeError, match="not empty"):
+        publish_data.clone(destination, str(remote))
+    assert (destination / "keep.txt").read_text() == "mine"
+
+
+def test_the_command_line_can_clone_and_reports_failure(remote, tmp_path, capsys):
+    assert publish_data.main(["--clone", str(tmp_path / "got"), "--repo-url", str(remote)]) == 0
+    assert (tmp_path / "got" / "README.md").exists()
+    assert publish_data.main(["--clone", str(tmp_path / "got2"), "--repo-url", str(tmp_path / "nope.git")]) == 1
+    assert "clone failed" in capsys.readouterr().err
+
+
+def test_the_command_line_needs_exactly_one_of_clone_or_publish(tmp_path):
+    with pytest.raises(SystemExit, match="Nothing to do"):
+        publish_data.main([])
+    with pytest.raises(SystemExit, match="either --clone or --publish"):
+        publish_data.main(["--clone", str(tmp_path / "x"), "--publish", "a=b"])
+
+
+def test_git_env_uses_the_deploy_key_and_never_prompts():
+    env = publish_data.git_env("/home/runner/.ssh/key")
+    assert "-i \"/home/runner/.ssh/key\"" in env["GIT_SSH_COMMAND"] and "BatchMode=yes" in env["GIT_SSH_COMMAND"]
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert publish_data.git_env().get("GIT_SSH_COMMAND") == os.environ.get("GIT_SSH_COMMAND")      # no key: leave ssh alone

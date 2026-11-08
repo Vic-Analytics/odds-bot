@@ -2,3 +2,4 @@
 # (The daily 8 AM job installs only requirements.txt, so it stays fast.)
 -r requirements.txt
 pytest
+PyYAML

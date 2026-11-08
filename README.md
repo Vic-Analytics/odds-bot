@@ -51,6 +51,7 @@ Soccer also shows the over/under on goals, and clubs get kit-color dots:
 - **Live game awareness.** A game that has already started when the digest runs is marked 🔴 LIVE with its current score, and its odds are labeled as live.
 - **Team emoji.** NFL, NBA, NHL, MLB and WNBA teams get an emoji matched by nickname, so "LA Clippers" and "Los Angeles Clippers" both work. Soccer clubs get two kit-color dots (a one-color kit shows its dot twice, and the Draw row gets 🤝🤝) so every row lines up. UFC fighters get a country flag from a hand-kept list, because the API doesn't provide nationality.
 - **Telegram-friendly output.** HTML formatting, one message per sport, and automatic splitting when a long slate would pass Telegram's 4096-character limit.
+- **Results recap.** Right after the last game of the day finishes, one more message lists every finished game: the score, the favorite according to that morning's odds, and whether the favorite won, it was an upset, or it was a draw (see below).
 - **Failure alerts.** If a sport fails, the others still send, and a short error message arrives on Telegram. The run also exits with an error code, so GitHub marks it failed.
 - **Retries.** Timeouts, dropped connections and temporary server errors are retried up to 3 times. Client errors (a bad key) and exhausted API credits are not, because trying again can't help.
 - **Tested.** Around 200 automated tests run on every push (see below).
@@ -117,6 +118,31 @@ If no digest arrives, I want to hear about it from something that does not depen
   6. Test it: Actions, Daily odds digest, Run workflow. The check on healthchecks.io should turn green within a minute. (A manual run sends a real digest and uses credits, like any manual run.)
 - **A late digest still counts if it lands before the deadline.** One that arrives after it triggers an alert; the digest is still sent when it runs.
 
+### Results recap
+
+When the last game of the day has finished, a second message arrives: one section per league with each finished game's score, the favorite according to that morning's consensus odds, and **Favorite won**, **Upset** or **Draw**. Soccer odds are for the first 90 minutes, so a soccer game that went to extra time counts as a draw. A busy day (a full Saturday) is split into 2 or 3 messages to stay under Telegram's length limit.
+
+```
+🏒 NHL
+🐧 Pittsburgh Penguins 2 – 4 🏔️ Colorado Avalanche
+Favorite: 🏔️ Colorado Avalanche 61% · ✅ Favorite won
+```
+
+- **How it knows the last game is over:** nothing announces it, so a workflow (`recap.yml`) wakes up every 20 minutes from 6 PM to 10 AM Central. Each run downloads that day's odds from the private data repo, asks the free score sources (ESPN, MLB, NHL) for the finals, and either says "still waiting on 3 games" and stops, or sends the recap and leaves a marker so it is sent once. It costs no Odds API credits.
+- **A day is 10 AM to 10 AM:** a game that starts at 9 PM and ends at 12:30 AM still belongs to the day it started on (`recap_gate.py`).
+- **A postponed game cannot hold it up:** a game with no final score 5 hours after its start is skipped. Games missing a score or odds are skipped quietly, and a day with no finished games sends nothing.
+- **How close to "right after":** GitHub starts scheduled runs late, often 30 to 60 minutes, so expect the recap roughly 20 to 80 minutes after the last final whistle. An always-on server would be faster; this stays free and needs no machine of my own.
+- **The secrets are split:** one step uses the deploy key only to download the data, and the next uses the Telegram token only to send.
+- **Try it safely on your computer** (nothing is sent, no credits are used; it needs a clone of the data repo, see "Analysis"):
+
+  ```
+  python recap.py --dry-run --data-dir ..\odds-history-data              today's recap, or "waiting: 3 of 12 games not final yet"
+  python recap.py --dry-run --data-dir ..\odds-history-data --no-wait    what is final right now
+  python recap.py --dry-run --data-dir ..\odds-history-data --date 2026-11-07
+  ```
+
+  In the cloud, Actions, Results recap, Run workflow sends a recap right away for whatever is final.
+
 ## Tech
 
 - Python 3.12, `requests` (calls the Telegram Bot API and The Odds API directly, with no bot framework)
@@ -142,12 +168,16 @@ If no digest arrives, I want to hear about it from something that does not depen
 | `http_utils.py` | Web requests that retry on temporary failures |
 | `storage.py` | Saves every odds response: raw JSON archive + SQLite database |
 | `results.py` | Fetches final scores from free sources, saves them, and attaches them to games |
+| `recap.py` | Sends the results recap once the day's last game has finished (`--dry-run` to preview) |
+| `recap_gate.py` | Decides whether a recap run is inside the 6 PM to 10 AM window, and which day it is for |
+| `central_time.py` | Central-time helpers (the day's UTC bounds, daylight saving included) |
 | `names.py` | Decides whether two team names from different sources are the same team |
 | `scripts/` | `backfill_from_raw.py` (rebuild the database), `publish_data.py` (save raw files to the private data repo), `ping_healthcheck.py` (the missed-digest alarm ping) and `best_moneyline_today.py` (an example query) |
 | `get_chat_id.py` | One-time helper to find your Telegram chat ID |
 | `tests/` | Automated tests (fake data only, no network) |
 | `.github/workflows/daily-odds.yml` | The schedule and cloud job |
 | `.github/workflows/results.yml` | Daily job that saves final scores to the private data repo |
+| `.github/workflows/recap.yml` | Every 20 minutes in the evening: sends the recap when the last game has finished |
 | `.github/workflows/tests.yml` | Runs the tests on every push and pull request |
 | `analysis/` | Read-only analysis tools: SQL, a loader and a starter notebook (own requirements) |
 
