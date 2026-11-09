@@ -140,3 +140,32 @@ def test_ufc_alternate_spellings():
 def test_unmapped_fighter_gets_no_flag_and_is_logged(capsys):
     assert ufc_flags.fighter_flag("Nobody Known") == ""
     assert "unmapped fighter: Nobody Known" in capsys.readouterr().out
+
+
+# ---------- clubs that used to show a plain soccer ball ----------
+
+NEW_CLUBS = {
+    "West Ham United": "🟤🔵", "Burnley": "🟤🔵", "Wolverhampton Wanderers": "🟠⚫",
+    "1. FC Heidenheim": "🔴🔵", "VfL Wolfsburg": "🟢⚪", "FC St. Pauli": "🟤⚪",
+}
+
+
+@pytest.mark.parametrize("club, dots", NEW_CLUBS.items())
+def test_these_clubs_now_have_kit_colors_and_are_not_reported_as_unmapped(club, dots, capsys):
+    assert soccer_emoji.soccer_emoji(club) == dots
+    assert "unmapped" not in capsys.readouterr().out
+    assert team_label("EPL", club) == f"{dots} {club}"
+
+
+@pytest.mark.parametrize("spelling, club", [
+    ("West Ham", "West Ham United"), ("Wolves", "Wolverhampton Wanderers"), ("Wolverhampton", "Wolverhampton Wanderers"),
+    ("Heidenheim", "1. FC Heidenheim"), ("FC Heidenheim 1846", "1. FC Heidenheim"), ("Wolfsburg", "VfL Wolfsburg"),
+    ("St. Pauli", "FC St. Pauli"), ("St Pauli", "FC St. Pauli"),
+])
+def test_other_spellings_of_these_clubs_get_the_same_colors(spelling, club):
+    assert soccer_emoji.soccer_emoji(spelling) == NEW_CLUBS[club]
+
+
+def test_the_new_labels_still_start_with_exactly_two_emoji():
+    for club in NEW_CLUBS:
+        assert len(team_label("EPL", club).split(" ", 1)[0]) == 2, club
