@@ -94,7 +94,7 @@ flowchart LR
     subgraph cloud["GitHub Actions (free)"]
         digest["Daily digest<br/>hourly, 7 AM-2 PM window"]
         results["Results job<br/>every morning"]
-        recap["Results recap<br/>every 20 min, 6 PM-10 AM"]
+        recap["Results recap<br/>checks every 3 min from about 10 PM"]
     end
 
     subgraph store["Private repo"]
@@ -187,10 +187,11 @@ When the last game of the day has finished, a second message arrives: one sectio
 Favorite: 🏔️ Colorado Avalanche 61% · ✅ Favorite won
 ```
 
-- **How it knows the last game is over:** nothing announces it, so a workflow (`recap.yml`) wakes up every 20 minutes from 6 PM to 10 AM Central. Each run downloads that day's odds from the private data repo, asks the free score sources (ESPN, MLB, NHL) for the finals, and either says "still waiting on 3 games" and stops, or sends the recap and leaves a marker so it is sent once. It costs no Odds API credits.
+- **How it knows the last game is over:** nothing announces it, so a run of `recap.yml` stays alive and checks the free score sources (ESPN, MLB, NHL) every 3 minutes until the last game is final, then sends the recap and leaves a marker so it is sent once. **Smart start:** no game is final sooner than 90 minutes after it starts, so each night the recap works out the earliest the last game could end (the latest game start plus 90 minutes: 10:40 PM on most nights) and does not ask for scores before that. A run that starts hours too early exits after about a minute, and one that starts within 30 minutes of that time stays and waits. It costs no Odds API credits.
 - **A day is 10 AM to 10 AM:** a game that starts at 9 PM and ends at 12:30 AM still belongs to the day it started on (`recap_gate.py`).
 - **A postponed game cannot hold it up:** a game with no final score 5 hours after its start is skipped. Games missing a score or odds are skipped quietly, and a day with no finished games sends nothing.
-- **How close to "right after":** GitHub starts scheduled runs late, often 30 to 60 minutes, so expect the recap roughly 20 to 80 minutes after the last final whistle. An always-on server would be faster; this stays free and needs no machine of my own.
+- **How close to "right after":** within a few minutes of the last final score. An earlier version woke up every 20 minutes and relied on GitHub's timer, but that timer is best effort: it really ran about once an hour, and on Nov 11 it started nothing for nine hours, so a recap that was minutes away arrived at 9 AM instead. Now the run that starts at the right time stays alive instead of depending on the timer again. The timer still starts a run every 30 minutes (every 10 minutes from about 9 PM to 2 AM, when it matters) to give GitHub many chances, and it is the safety net that sends a missed recap the next morning; an extra run that finds the "already sent" marker does nothing.
+- **What it costs:** GitHub Actions time, which is free while this repository is public. Checking all evening would take about 6 hours a night (roughly 170 hours a month). Smart start takes about 1 to 2.5 hours a night (from about 10:10 PM until the last final) plus about a minute for each early run that exits, roughly 60 hours a month. A private repository gets 2,000 free minutes (about 33 hours) a month, which even this would exceed, so make it private only if you change this first. The risk of smart start is that the run that matters must be started by GitHub's timer: if it skips every attempt from about 10 PM to the finish, the recap arrives the next morning, and the missed-recap alarm below tells you.
 - **The secrets are split:** one step uses the deploy key only to download the data, and the next uses the Telegram token only to send.
 - **Try it safely on your computer** (nothing is sent, no credits are used; it needs a clone of the data repo, see "Analysis"):
 
@@ -203,6 +204,22 @@ Favorite: 🏔️ Colorado Avalanche 61% · ✅ Favorite won
   Run these from the project folder with the project's own Python, as above. A plain `python` is your computer's general Python and does not have the libraries (the error is `No module named 'dotenv'`).
 
   In the cloud, Actions, Results recap, Run workflow sends a recap right away for whatever is final.
+
+### Missed-recap alarm
+
+The recap has its own heartbeat on healthchecks.io, set up the same way as the digest alarm above. Once the day's recap is done (sent, or the day had no games to report), the workflow pings a second check. If that ping has not arrived by **4:00 AM Central**, healthchecks.io sends an alert, so a night like Nov 11 (recap at 9 AM) tells you at 4 AM instead of leaving you wondering.
+
+- **What counts as done:** the recap was sent, or the day finished with nothing to report. The ping runs after the recap went out and the marker was saved, tries at most 3 times for 10 seconds each, can never fail the run, and does nothing if the secret is missing (the same `scripts/ping_healthcheck.py`, told to read `HEALTHCHECK_RECAP_PING_URL`). A manual "Run workflow" run does not ping.
+- **One-time setup** (about 5 minutes, in the same healthchecks.io account):
+  1. Create a second check named `Results recap`.
+  2. Set the schedule to the cron expression `0 17 * * *`, the time zone to `America/Chicago`, and the grace time to **11 hours**. It then alerts at 4:00 AM Central and follows daylight saving by itself.
+  3. Turn on the same Telegram integration for it (the check's **Integrations** tab).
+  4. Copy this check's own **ping URL**. It is a different URL from the digest check's.
+  5. In this repo go to Settings, Secrets and variables, Actions, New repository secret. Name it `HEALTHCHECK_RECAP_PING_URL` and paste the URL. Treat it like a password.
+  6. Test the wiring without waiting for tonight: open the ping URL once in your browser. The check turns green. After that the nightly recap keeps it green.
+- **Why the cron time is 5 PM and not 4 AM:** healthchecks.io expects the next ping at the first cron time *after the last ping*. A recap ping at 12:30 AM with a 3 AM schedule would make it expect a second ping at 3 AM the same night and alert every night. The recap window opens at 6 PM, so no ping can arrive before 5 PM: after a ping the next expected time is 5 PM the next day, and the alert comes 11 hours later, at 4:00 AM.
+- **Choosing the deadline:** the slowest legitimate night is one where a postponed game is waited on for 5 hours after its start (about 3:10 AM at the latest), so 4:00 AM gives a margin without false alarms. To change it, change the grace time (10 hours is 3:00 AM, 12 hours is 5:00 AM). A recap that arrives late (the 9 AM safety net) still pings, and the check turns green again.
+- **Days with no games** also ping, shortly after midnight, so a quiet day does not raise a false alarm.
 
 ## Tech
 
@@ -233,12 +250,12 @@ Favorite: 🏔️ Colorado Avalanche 61% · ✅ Favorite won
 | `recap_gate.py` | Decides whether a recap run is inside the 6 PM to 10 AM window, and which day it is for |
 | `central_time.py` | Central-time helpers (the day's UTC bounds, daylight saving included) |
 | `names.py` | Decides whether two team names from different sources are the same team |
-| `scripts/` | `make_demo.py` (build the fake-data demo page), `backfill_from_raw.py` (rebuild the database), `publish_data.py` (save raw files to the private data repo), `ping_healthcheck.py` (the missed-digest alarm ping) and `best_moneyline_today.py` (an example query) |
+| `scripts/` | `make_demo.py` (build the fake-data demo page), `backfill_from_raw.py` (rebuild the database), `publish_data.py` (save raw files to the private data repo), `ping_healthcheck.py` (the missed-digest and missed-recap alarm pings) and `best_moneyline_today.py` (an example query) |
 | `get_chat_id.py` | One-time helper to find your Telegram chat ID |
 | `tests/` | Automated tests (fake data only, no network) |
 | `.github/workflows/daily-odds.yml` | The schedule and cloud job |
 | `.github/workflows/results.yml` | Daily job that saves final scores to the private data repo |
-| `.github/workflows/recap.yml` | Every 20 minutes in the evening: sends the recap when the last game has finished |
+| `.github/workflows/recap.yml` | Starts in the evening, waits for the last game to be final (smart start) and sends the recap; pings the recap alarm |
 | `.github/workflows/tests.yml` | Runs the tests on every push and pull request |
 | `analysis/` | Read-only analysis tools: the dashboard, its calculations (`stats.py`), SQL, a loader, a starter notebook and the fake-data generator (`demo_data.py`) |
 | `docs/` | The public demo page (`index.html`, built from fake data) and its screenshot |

@@ -2,8 +2,9 @@
 recap_gate.py - decides whether a scheduled recap run should do anything right now.
 
 The results recap is sent when the LAST game of a day has finished. Games run from
-the afternoon to after midnight Central, so the recap workflow wakes up every 20
-minutes through the evening and night, and each run asks this script two questions:
+the afternoon to after midnight Central, so the recap workflow starts in the evening and
+stays alive checking the scores (a timer run every 30 minutes is the safety net), and each
+run asks this script two questions before it does:
 
   1. Is it inside the recap window? (6 PM to 10 AM Central.) Outside it, do nothing.
   2. Which day is this recap for? A "recap day" runs from 10 AM to 10 AM, so a game

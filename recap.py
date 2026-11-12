@@ -10,14 +10,25 @@ are for the first 90 minutes, so a soccer game that went to extra time counts as
     python recap.py --dry-run --no-wait       print what is final right now, even if games are still going
     python recap.py --data-dir ..\\odds-history-data      the folder that holds raw/ (a clone of the private data repo)
 
-How it works (the cloud workflow runs this every 20 minutes through the evening):
+    python recap.py --keep-waiting 300 --start-within 30
+                                              the cloud's command: keep checking every 3 minutes until the last game is
+                                              final, but only start once that could be within 30 minutes (smart start)
+
+How it works (the cloud workflow starts this in the evening and lets it keep checking):
   1. Build a small temporary database from the odds files for that day (the morning
      digests saved them in the private data repo).
   2. Ask the FREE score sources (ESPN, MLB, NHL) for the finals of every league that plays
      that day. This never touches the Odds API, so it costs no credits.
-  3. If any game is still going, wait: say so and send nothing. The next run looks again.
+  3. If any game is still going, wait: say so and send nothing. With --keep-waiting the
+     program stays alive and looks again every few minutes, so the recap goes out minutes
+     after the last final whistle. It does not depend on GitHub starting a new run on time
+     (GitHub's timer is best effort: on Nov 11 it started nothing for nine hours).
      A game with no final score 5 hours after its start is treated as postponed (or not
      reported by the source) and no longer holds the recap up.
+     Smart start (--start-within): no game is final sooner than 90 minutes after it starts,
+     so before the day's latest start plus 90 minutes (10:40 PM on most nights) it does not
+     even ask the score sources, and a run that is hours too early just exits instead of
+     idling: that saves most of the GitHub Actions time.
   4. Once everything is final, send the recap and write the marker file, so the workflow
      does not send it twice.
 
@@ -63,6 +74,16 @@ GAME_LINES_SQL = (HERE / "analysis" / "sql" / "game_lines.sql").read_text(encodi
 # A game with no final score this long after it started is treated as postponed (or not
 # reported by the score source). Without this, one postponed game would hold the recap up forever.
 GIVE_UP_HOURS = 5
+
+# While games are still going, look again this often (seconds). Three minutes means the recap
+# arrives about 1.5 minutes after the last final score on average, and the free score sources
+# (a handful of requests per look) are not bothered more than a person refreshing a page.
+POLL_SECONDS = 180
+
+# No game is final sooner than this after it starts (a soccer match alone is 90 minutes plus half time).
+# So the recap cannot be ready before the day's latest game start plus this: checking the scores earlier
+# only burns GitHub Actions time. Used by the "smart start" (--start-within).
+EARLIEST_FINAL_MINUTES = 90
 
 RESULT_NOTES = {"FINAL_OT": "OT", "FINAL_SO": "SO", "FINAL_AET": "after extra time", "FINAL_PEN": "after penalties"}
 LEAGUE_ORDER = {key: position for position, key in enumerate(SPORTS.values())}
@@ -233,16 +254,33 @@ def format_recap(games, day):
 
 # ---------- deciding what to do ----------
 
-def evaluate(data_dir, day, now=None, fetch=None, no_wait=False):
+def earliest_recap_time(games, now):
+    """The earliest moment the last of the not-yet-given-up games could be final, or None if there are none."""
+    pending = progress(games, now)["pending"]
+    if not pending:
+        return None
+    return max(g["start"] for g in pending) + timedelta(minutes=EARLIEST_FINAL_MINUTES)
+
+
+def evaluate(data_dir, day, now=None, fetch=None, no_wait=False, start_within=None):
     """Work out what the recap for `day` should do right now. Sends nothing.
 
-    Returns {"day", "messages", "done", "reason"}:
-      messages  the recap to send (empty when waiting, or when there is nothing to report)
-      done      True when the day needs no more checking (sent, or nothing will ever be sent)
-      reason    one line saying what happened, for the log
+    Returns {"day", "messages", "done", "waiting", "too_early", "check_from", "reason"}:
+      messages    the recap to send (empty when waiting, or when there is nothing to report)
+      done        True when the day needs no more checking (sent, or nothing will ever be sent)
+      waiting     True when games are still going, so looking again soon will help
+                  (False for a day with no games: looking again in a few minutes changes nothing)
+      too_early   True when it did not even ask for scores because the last game cannot be final yet
+      check_from  when that will first be possible (only set together with too_early)
+      reason      one line saying what happened, for the log
+
+    start_within (minutes) switches on the "smart start": while the earliest possible finish of the day's last
+    game is still in the future, the score sources are not asked at all. None (the default) asks every time, and
+    a manual no_wait check never holds back.
     """
     now = (now or datetime.now(CENTRAL)).astimezone(CENTRAL)
-    outcome = {"day": day, "messages": [], "done": False, "reason": ""}
+    outcome = {"day": day, "messages": [], "done": False, "waiting": False, "too_early": False, "check_from": None,
+               "reason": ""}
 
     with tempfile.TemporaryDirectory() as temp:
         raw = Path(temp) / "raw"
@@ -252,7 +290,9 @@ def evaluate(data_dir, day, now=None, fetch=None, no_wait=False):
         storage.rebuild_from_raw(raw, database, rebuild=True)
         with closing(storage.connect(database)) as conn:
             games = games_on(conn, day)
-            if games:
+            check_from = earliest_recap_time(games, now) if games and start_within is not None and not no_wait else None
+            too_early = check_from is not None and now < check_from
+            if games and not too_early:
                 fetch_scores(conn, {g["sport_key"] for g in games}, day, fetch)
                 games = games_on(conn, day)
             state = progress(games, now)
@@ -269,10 +309,18 @@ def evaluate(data_dir, day, now=None, fetch=None, no_wait=False):
             reason = f"no games with odds and a score source on {day}" + ("" if day_over else " (yet), will look again")
         outcome.update(done=day_over, reason=reason)
         return outcome
+    if too_early:
+        latest = max(state["pending"], key=lambda g: g["start"])
+        outcome.update(waiting=True, too_early=True, check_from=check_from,
+                       reason=(f"too early to ask for scores: the latest of {len(games)} game(s) "
+                               f"{'starts' if latest['start'] > now else 'started'} at {latest['start']:%I:%M %p} CT, "
+                               f"so the earliest it could be final is {check_from:%I:%M %p} CT"))
+        return outcome
     if state["pending"] and not no_wait:
         latest = max(state["pending"], key=lambda g: g["start"])
         outcome["reason"] = (f"waiting: {len(state['pending'])} of {len(games)} game(s) not final yet "
                              f"(the latest started {latest['start']:%I:%M %p} CT)")
+        outcome["waiting"] = True
         return outcome
     outcome["done"] = not state["pending"]
     if not finals:
@@ -288,6 +336,55 @@ def evaluate(data_dir, day, now=None, fetch=None, no_wait=False):
     return outcome
 
 
+# ---------- keeping watch ----------
+
+HEARTBEAT_LOOKS = 20            # say "still waiting" at least this often (every hour at 3-minute looks), even if nothing changed
+
+
+def check_until_done(data_dir, day, report, no_wait=False, keep_waiting=0, poll_seconds=POLL_SECONDS,
+                     start_within=None, clock=None, sleep=None):
+    """evaluate() once and, while games are still going, again every `poll_seconds` for up to `keep_waiting` minutes.
+
+    This is what makes the recap arrive minutes after the last final score even when GitHub starts nothing new:
+    one run stays alive and keeps looking. With keep_waiting=0 it looks exactly once.
+
+    start_within (minutes) is the "smart start", which saves GitHub Actions time: when the day's last game cannot
+    be final for longer than that, it returns at once (a later timer run will start the real waiting) instead of
+    sitting idle for hours. When it is closer than that, it waits here, so it is already running when the time comes.
+
+    report(outcome) is called with the outcome of the first look, of every look that says something new
+    (a game finished), once an hour while nothing changes, and of the last look.
+    Returns the last outcome, or None if the very last look failed. A look that fails after the first one
+    (a hiccup in the middle of a long wait) is logged and tried again; the first look failing is raised,
+    so a setup mistake shows up at once instead of being retried for hours.
+    """
+    clock, sleep = clock or time.monotonic, sleep or time.sleep
+    deadline = clock() + keep_waiting * 60
+    last_reason, looks = None, 0
+    while True:
+        looks += 1
+        now = datetime.now(CENTRAL)
+        try:
+            outcome = evaluate(data_dir, day, now, no_wait=no_wait, start_within=start_within)
+        except Exception as error:
+            if looks == 1:
+                raise
+            log(f"look {looks} failed, trying again: {type(error).__name__}: {scrub(str(error))[:200]}")
+            outcome = None
+        time_left = deadline - clock()
+        if outcome is not None:
+            too_far = outcome["too_early"] and outcome["check_from"] - now > timedelta(minutes=start_within)
+            stop = not outcome["waiting"] or time_left <= 0 or too_far
+            if stop or looks == 1 or outcome["reason"] != last_reason or looks % HEARTBEAT_LOOKS == 0:
+                report(outcome)
+            last_reason = outcome["reason"]
+            if stop:
+                return outcome
+        elif time_left <= 0:
+            return None
+        sleep(min(poll_seconds, time_left))
+
+
 # ---------- the command line ----------
 
 def main(argv=None):
@@ -296,8 +393,17 @@ def main(argv=None):
     parser.add_argument("--data-dir", help="folder that holds raw/ (default: data/; in the cloud, the data repo clone)")
     parser.add_argument("--dry-run", action="store_true", help="print the recap instead of sending it")
     parser.add_argument("--no-wait", action="store_true", help="report what is final now even if games are still going")
+    parser.add_argument("--keep-waiting", type=float, default=0, metavar="MINUTES",
+                        help="while games are still going, keep checking for up to this many minutes (default 0: check once)")
+    parser.add_argument("--poll-seconds", type=int, default=POLL_SECONDS, metavar="SECONDS",
+                        help="how often to check while waiting (default %(default)s)")
+    parser.add_argument("--start-within", type=float, default=None, metavar="MINUTES",
+                        help="smart start: if the day's last game cannot be final for longer than this, stop at once "
+                             "and let a later run do the waiting (default: always start)")
     parser.add_argument("--marker-file", help="write this file once the day is finished (the workflow uses it)")
     args = parser.parse_args(argv)
+    if args.keep_waiting < 0 or args.poll_seconds < 1 or (args.start_within is not None and args.start_within < 0):
+        parser.error("--keep-waiting and --start-within cannot be negative and --poll-seconds must be at least 1")
 
     now = datetime.now(CENTRAL)
     try:
@@ -306,8 +412,18 @@ def main(argv=None):
         raise SystemExit(f"--date must look like 2026-11-08, not {args.date!r}")
     data_dir = Path(args.data_dir) if args.data_dir else storage.data_dir()
 
-    outcome = evaluate(data_dir, day, now, no_wait=args.no_wait)
-    print(f"Results recap for {day}: {outcome['reason']}")
+    def report(found):
+        print(f"Results recap for {day}: {found['reason']}", flush=True)       # flushed: the cloud log shows progress live
+
+    outcome = check_until_done(data_dir, day, report, no_wait=args.no_wait, keep_waiting=args.keep_waiting,
+                               poll_seconds=args.poll_seconds, start_within=args.start_within)
+    if outcome is None:
+        print("FAILED: the last check of the scores failed, so nothing was decided.", file=sys.stderr)
+        return 1                                # no marker, so the next run tries again
+    if outcome["too_early"]:
+        log(f"not time to start yet; a later run begins checking at about {outcome['check_from']:%I:%M %p} CT")
+    elif outcome["waiting"] and args.keep_waiting:
+        log(f"stopped waiting after {args.keep_waiting:g} minutes; the next run carries on")
 
     try:
         for position, message in enumerate(outcome["messages"]):

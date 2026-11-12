@@ -1,13 +1,15 @@
 """
-ping_healthcheck.py - tell healthchecks.io that today's digest was delivered.
+ping_healthcheck.py - tell healthchecks.io that today's digest (or recap) was delivered.
 
-This is the "missed-digest alarm". healthchecks.io expects one ping a day. If the
+This is the "missed-message alarm". healthchecks.io expects one ping a day. If the
 ping does not arrive by the deadline you set there, it sends you an alert (see the
 README for the one-time setup). Because the alert comes from outside GitHub, it
 still reaches you when GitHub, the schedule or the Telegram token is what broke.
 
-The ping URL is a secret (anyone who has it can fake a ping), so it lives in the
-GitHub secret HEALTHCHECK_PING_URL and is never printed.
+There are two checks, each with its own URL: the morning digest (HEALTHCHECK_PING_URL,
+the default) and the evening results recap (HEALTHCHECK_RECAP_PING_URL, chosen with
+--url-env). Each URL is a secret (anyone who has it can fake a ping), so it lives in a
+GitHub secret and is never printed.
 
 This must never get in the way of the digest, so it:
   * is called only AFTER the digest has been sent,
@@ -15,9 +17,11 @@ This must never get in the way of the digest, so it:
   * never raises and always exits 0, whatever happens,
   * does nothing if the secret is not set (so the alarm is optional).
 
-    python scripts/ping_healthcheck.py
+    python scripts/ping_healthcheck.py                                       the digest check
+    python scripts/ping_healthcheck.py --url-env HEALTHCHECK_RECAP_PING_URL  the recap check
 """
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -33,11 +37,11 @@ def log(message):
     print(f"[healthcheck] {message}", file=sys.stderr)
 
 
-def ping(url=None):
+def ping(url=None, env_name=ENV_NAME):
     """Send the ping. Returns True if healthchecks.io accepted it. Never raises."""
-    url = (os.environ.get(ENV_NAME, "") if url is None else url).strip()
+    url = (os.environ.get(env_name, "") if url is None else url).strip()
     if not url:
-        log(f"{ENV_NAME} is not set, so no ping was sent (the alarm is switched off)")
+        log(f"{env_name} is not set, so no ping was sent (the alarm is switched off)")
         return False
     if not url.startswith("https://"):
         log("the ping URL must start with https://, so no ping was sent")
@@ -55,8 +59,12 @@ def ping(url=None):
     return True
 
 
-def main():
-    ping()
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Tell healthchecks.io that a message was delivered.")
+    parser.add_argument("--url-env", default=ENV_NAME, metavar="NAME",
+                        help="the environment variable that holds the ping URL (default %(default)s)")
+    args, _ignored = parser.parse_known_args(argv)       # unknown extras are ignored: this must never fail the run
+    ping(env_name=args.url_env)
     return 0          # a failed ping must never turn the run red or stop anything after it
 
 

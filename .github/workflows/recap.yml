@@ -2,32 +2,55 @@
 #
 # How it works (and why it is built this way):
 #   Games run from the afternoon until after midnight Central, and nothing tells us
-#   "the last game just ended". So this job wakes up every 20 minutes through the
-#   evening and night (6 PM to 10 AM Central) and checks:
-#     1. recap_gate.py: is it inside the window, and which day is this recap for?
-#        (A recap day runs from 10 AM to 10 AM, so a game that ends at 12:30 AM
-#        still belongs to the day it started on.)
+#   "the last game just ended". Two facts shape the design:
+#     * No game is final sooner than 90 minutes after it starts, so the recap cannot be
+#       ready before the day's LATEST game start plus 90 minutes (10:40 PM on most nights).
+#       Before that there is nothing to check, so a run that starts too early exits after
+#       about a minute instead of idling (smart start, recap.py --start-within 30).
+#     * GitHub's timer is best effort. It really starts this about once an hour, and on
+#       Nov 11 it started nothing for nine hours, so a recap that was a few minutes away
+#       arrived at 9 AM. So the run that starts at the right time does NOT hand over to a
+#       later timer run: it stays alive and checks the scores every 3 minutes until the last
+#       game is final. Games with no final score 5 hours after their start are given up on,
+#       so this never lasts more than about 4 hours.
+#   Each run does this:
+#     1. recap_gate.py: is it inside the window (6 PM to 10 AM Central), and which day is
+#        this recap for? (A recap day runs from 10 AM to 10 AM, so a game that ends at
+#        12:30 AM still belongs to the day it started on.)
 #     2. Was that day's recap already sent? A small marker in GitHub's cache says so.
-#     3. recap.py downloads the day's odds from the private data repo, asks the FREE
-#        score sources (ESPN, MLB, NHL) for the finals, and:
-#          - if any game is still going: says so and stops. The next run looks again.
-#          - if everything is final: sends the recap and writes the marker.
-#        A game with no final score 5 hours after its start (postponed, or not
-#        reported) no longer holds the recap up.
-#   It costs no Odds API credits. GitHub starts scheduled runs late (often 30 to 60
-#   minutes), so "right after the last game" means within roughly 20 to 80 minutes.
+#     3. recap.py downloads the day's odds from the private data repo, then:
+#          - too early for the last game to be final: exits (a later timer run starts the wait);
+#          - within 30 minutes of that, or later: asks the FREE score sources (ESPN, MLB, NHL)
+#            for the finals every 3 minutes, and sends the recap once everything is final.
+#     4. Once the recap is done (sent, or nothing to report) it writes the marker, then pings
+#        healthchecks.io, which alerts you if that ping has not arrived by 4 AM Central.
 #
-# The secrets are split between steps: the deploy key only downloads the data, and the
-# Telegram token only sends the message. Neither step can see the other's secret.
+#   The timer starts a run every 30 minutes all night, and every 10 minutes through the hours
+#   when the last game finishes, to give GitHub many chances to start the one that matters.
+#   It is also the safety net that sends last night's recap in the morning if a night went
+#   wrong. Extra runs wait in line (see "concurrency") and then see the marker, so nothing
+#   is sent twice.
+#
+#   It costs no Odds API credits. Staying alive from about 10:10 PM until the last final
+#   (usually 1 to 2 hours) is far less Actions time than checking all evening, and it is free
+#   while this repository is public. For a private repository (2,000 free minutes a month)
+#   it is still too much.
+#
+# The secrets are split between steps: the deploy key only downloads the data, the Telegram
+# token only sends the message, and the recap's healthchecks.io URL only pings. None of those
+# steps can see the others' secrets.
 
 name: Results recap
 
 on:
   schedule:
-    # Every 20 minutes (:07, :27, :47: GitHub is busiest at :00) from 23:00 to 15:59 UTC.
+    # Every 30 minutes (:07 and :37: GitHub is busiest at :00) from 23:00 to 15:59 UTC.
     # That covers 6 PM to 10 AM Central in summer and winter; recap_gate.py makes the
     # exact decision, daylight saving included.
-    - cron: "7,27,47 23,0-15 * * *"
+    - cron: "7,37 23,0-15 * * *"
+    # Extra attempts every 10 minutes from 03:00 to 07:59 UTC: about 9 PM to 2 AM Central in
+    # winter and 10 PM to 3 AM in summer, when the day's last game is about to finish.
+    - cron: "3,13,23,33,43,53 3-7 * * *"
   # Adds a "Run workflow" button. A manual run sends right away whatever is final
   # (even if some games are still going) and ignores the "already sent" marker.
   workflow_dispatch:
@@ -40,15 +63,20 @@ on:
 permissions:
   contents: read
 
-# Never run two copies at once, so two runs can't both send the same recap.
+# Never run two timer-started copies at once, so two runs can't both send the same recap.
+# A run that starts while another is going waits in line (only the newest waiting run is
+# kept, the older ones are cancelled: that is normal). A manual run gets a group of its
+# own, so pressing "Run workflow" never waits behind a night of checking.
 concurrency:
-  group: results-recap
+  group: ${{ github.event_name == 'schedule' && 'results-recap' || format('results-recap-manual-{0}', github.run_id) }}
   cancel-in-progress: false
 
 jobs:
   recap:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # A job may run 6 hours at most. A run that starts when it should finishes within about 4
+    # hours (games are given up on after 5 hours); --keep-waiting 300 and this limit are backstops.
+    timeout-minutes: 330
 
     steps:
       - uses: actions/checkout@v4
@@ -94,8 +122,10 @@ jobs:
           rm -f ~/.ssh/data_deploy_key
 
       # Check the scores and, if the day is finished, send the recap. Only the Telegram
-      # secrets are used here. On scheduled runs recap.py writes recap.marker once the
-      # day needs no more checking. A manual run (--no-wait) sends what is final now.
+      # secrets are used here. A scheduled run exits at once if the last game cannot be final
+      # yet (--start-within 30); otherwise it keeps checking every 3 minutes for up to 5 hours
+      # (--keep-waiting 300), then writes recap.marker once the day needs no more checking.
+      # A manual run (--no-wait) sends what is final now.
       - name: Send the recap if the last game has finished
         if: steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true'
         env:
@@ -105,7 +135,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           if [ "$EVENT" = "schedule" ]; then
-            python recap.py --data-dir data-repo --date "$RECAP_DAY" --marker-file recap.marker
+            python recap.py --data-dir data-repo --date "$RECAP_DAY" --marker-file recap.marker --keep-waiting 300 --start-within 30
           else
             python recap.py --data-dir data-repo --date "$RECAP_DAY" --no-wait
           fi
@@ -118,3 +148,14 @@ jobs:
         with:
           path: recap.marker
           key: recap-sent-${{ steps.gate.outputs.day }}
+
+      # The recap alarm: tell healthchecks.io the day's recap is done (sent, or there was nothing
+      # to report). Only after the recap went out and the marker was saved, so it can never delay
+      # them. It never fails the run, and does nothing if the secret is not set. The ping URL is a
+      # secret of its own, separate from the digest alarm's.
+      - name: Tell healthchecks.io the recap is done
+        if: github.event_name == 'schedule' && steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true' && hashFiles('recap.marker') != ''
+        timeout-minutes: 1
+        env:
+          HEALTHCHECK_RECAP_PING_URL: ${{ secrets.HEALTHCHECK_RECAP_PING_URL }}
+        run: python scripts/ping_healthcheck.py --url-env HEALTHCHECK_RECAP_PING_URL
