@@ -1,4 +1,4 @@
-"""Tests for the missed-digest alarm ping. Fake network only: nothing is ever contacted."""
+"""Tests for the missed-message alarm pings (digest and recap). Fake network only: nothing is ever contacted."""
 
 import importlib.util
 import subprocess
@@ -112,7 +112,7 @@ def test_even_an_unexpected_error_is_swallowed(network, capsys):
 def test_main_always_exits_zero(network, monkeypatch, answers):
     monkeypatch.setenv("HEALTHCHECK_PING_URL", URL)
     network.answers[:] = answers
-    assert ping_healthcheck.main() == 0
+    assert ping_healthcheck.main([]) == 0
 
 
 def test_running_the_script_without_a_secret_exits_zero(tmp_path):
@@ -120,3 +120,36 @@ def test_running_the_script_without_a_secret_exits_zero(tmp_path):
                             env={"PATH": "", "SYSTEMROOT": __import__("os").environ.get("SYSTEMROOT", "")})
     assert result.returncode == 0
     assert "not set" in result.stderr
+
+
+# ---------- the second check: the results recap has its own secret ----------
+
+RECAP_URL = "https://hc-ping.com/99999999-8888-7777-6666-SECRETSECRET"
+
+
+def test_the_recap_check_uses_its_own_secret_and_never_the_digests(network, monkeypatch):
+    monkeypatch.setenv("HEALTHCHECK_PING_URL", URL)
+    monkeypatch.setenv("HEALTHCHECK_RECAP_PING_URL", RECAP_URL)
+    assert ping_healthcheck.main(["--url-env", "HEALTHCHECK_RECAP_PING_URL"]) == 0
+    assert [url for _, url, _ in network.calls] == [RECAP_URL]
+
+
+def test_the_digest_check_still_uses_the_digest_secret_by_default(network, monkeypatch):
+    monkeypatch.setenv("HEALTHCHECK_PING_URL", URL)
+    monkeypatch.setenv("HEALTHCHECK_RECAP_PING_URL", RECAP_URL)
+    assert ping_healthcheck.main([]) == 0
+    assert [url for _, url, _ in network.calls] == [URL]
+
+
+def test_the_recap_check_does_nothing_without_its_own_secret_even_if_the_digest_secret_is_set(network, monkeypatch, capsys):
+    monkeypatch.setenv("HEALTHCHECK_PING_URL", URL)
+    monkeypatch.delenv("HEALTHCHECK_RECAP_PING_URL", raising=False)
+    assert ping_healthcheck.main(["--url-env", "HEALTHCHECK_RECAP_PING_URL"]) == 0
+    assert network.calls == []
+    assert "HEALTHCHECK_RECAP_PING_URL is not set" in capsys.readouterr().err
+
+
+def test_strange_arguments_never_make_the_ping_fail(network, monkeypatch):
+    monkeypatch.setenv("HEALTHCHECK_PING_URL", URL)
+    assert ping_healthcheck.main(["--nonsense", "x", "-q"]) == 0
+    assert [url for _, url, _ in network.calls] == [URL]

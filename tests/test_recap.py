@@ -383,11 +383,13 @@ class Clock:
 
 
 def waiting(reason="waiting: 2 of 3 game(s) not final yet (the latest started 09:00 PM CT)"):
-    return {"day": DAY, "messages": [], "done": False, "waiting": True, "reason": reason}
+    return {"day": DAY, "messages": [], "done": False, "waiting": True, "too_early": False, "check_from": None,
+            "reason": reason}
 
 
 def finished():
-    return {"day": DAY, "messages": ["the recap"], "done": True, "waiting": False, "reason": "3 finished game(s)"}
+    return {"day": DAY, "messages": ["the recap"], "done": True, "waiting": False, "too_early": False, "check_from": None,
+            "reason": "3 finished game(s)"}
 
 
 @pytest.fixture
@@ -405,8 +407,8 @@ def watch(monkeypatch):
     monkeypatch.setattr(recap, "datetime", Now)
 
     def script(*items, **kwargs):
-        def fake(data_dir, day, now, no_wait=False):
-            looks.append({"now": now, "no_wait": no_wait})
+        def fake(data_dir, day, now, no_wait=False, start_within=None):
+            looks.append({"now": now, "no_wait": no_wait, "start_within": start_within})
             item = items[min(len(looks) - 1, len(items) - 1)]
             if isinstance(item, Exception):
                 raise item
@@ -448,7 +450,7 @@ def test_it_stops_at_the_time_limit_without_sleeping_past_it(watch):
 
 
 def test_a_day_with_no_games_is_not_waited_for(watch):
-    quiet = {"day": DAY, "messages": [], "done": False, "waiting": False,
+    quiet = {"day": DAY, "messages": [], "done": False, "waiting": False, "too_early": False, "check_from": None,
              "reason": "no games with odds and a score source on 2026-11-08 (yet), will look again"}
     assert watch(quiet, keep_waiting=330) == quiet
     assert len(watch.looks) == 1 and watch.clock.sleeps == []
@@ -570,3 +572,159 @@ def test_if_every_look_after_the_first_fails_the_command_exits_with_1_and_leaves
     assert sent == [] and not marker.exists()                             # the next part (or run) tries again
     err = capsys.readouterr().err
     assert "look 2 failed, trying again" in err and "FAILED: the last check of the scores failed" in err
+
+
+# ---------- smart start: do not even look until the last game could be final ----------
+# The fake day's latest game (the Lakers) starts at 9:00 PM CST, so the recap cannot be ready before 10:30 PM CST.
+
+CHECK_FROM = at("2026-11-09T04:30:00")               # 10:30 PM CST on Nov 8 = 9:00 PM + 90 minutes
+
+
+def counting(by_sport):
+    """A fake score source that remembers which leagues it was asked about."""
+    asked = []
+
+    def fetch(key, days):
+        asked.append(key)
+        return "test", by_sport.get(key, [])
+    fetch.asked = asked
+    return fetch
+
+
+def early(minutes_away):
+    """What evaluate() reports when the last game cannot be final for another `minutes_away` minutes (from 8:30 PM)."""
+    return {"day": DAY, "messages": [], "done": False, "waiting": True, "too_early": True,
+            "check_from": NOW_EVENING + timedelta(minutes=minutes_away), "reason": "too early to ask for scores: test"}
+
+
+def test_smart_start_asks_nobody_for_scores_before_the_last_game_could_be_final(day_of_games):
+    fetch = counting(ALL_FINAL)
+    outcome_ = evaluate(fetch, now=NOW_EVENING, start_within=30)          # 8:30 PM: two hours too early
+    assert fetch.asked == []                                              # no requests, no work
+    assert outcome_["too_early"] is True and outcome_["waiting"] is True and outcome_["done"] is False
+    assert outcome_["messages"] == [] and outcome_["check_from"].astimezone(UTC) == CHECK_FROM
+    assert "too early to ask for scores" in outcome_["reason"]
+    assert "starts at 09:00 PM CT" in outcome_["reason"] and "10:30 PM CT" in outcome_["reason"]
+
+
+def test_the_reason_says_started_once_the_last_game_is_underway(day_of_games):
+    outcome_ = evaluate(counting(ALL_FINAL), now=at("2026-11-09T04:00:00"), start_within=30)      # 10:00 PM CST
+    assert outcome_["too_early"] is True and "started at 09:00 PM CT" in outcome_["reason"]
+
+
+def test_it_starts_asking_at_the_exact_moment_the_last_game_could_be_final(day_of_games):
+    just_before = counting(ALL_FINAL)
+    assert evaluate(just_before, now=CHECK_FROM - timedelta(seconds=1), start_within=30)["too_early"] is True
+    assert just_before.asked == []
+    on_time = counting(ALL_FINAL)
+    outcome_ = evaluate(on_time, now=CHECK_FROM, start_within=30)
+    assert outcome_["too_early"] is False and outcome_["check_from"] is None
+    assert sorted(on_time.asked) == ["basketball_nba", "icehockey_nhl"]  # now it asks, once per league
+    assert outcome_["done"] is True and len(outcome_["messages"]) == 1
+
+
+def test_without_smart_start_it_asks_every_time_like_before(day_of_games):
+    fetch = counting(ALL_FINAL)
+    outcome_ = evaluate(fetch, now=NOW_EVENING)                           # same early hour, no start_within
+    assert fetch.asked and outcome_["too_early"] is False
+    assert "waiting:" in outcome_["reason"] or "finished game" in outcome_["reason"]
+
+
+def test_a_manual_check_is_never_held_back_by_smart_start(day_of_games):
+    fetch = counting(ALL_FINAL)
+    outcome_ = evaluate(fetch, now=NOW_EVENING, no_wait=True, start_within=30)
+    assert fetch.asked and outcome_["too_early"] is False and len(outcome_["messages"]) == 1
+
+
+def test_games_already_given_up_on_do_not_hold_back_the_recap(day_of_games):
+    fetch = counting(dict(ALL_FINAL, basketball_nba=[]))
+    outcome_ = evaluate(fetch, now=NOW_MUCH_LATER, start_within=30)       # 3 AM: every game started 5+ hours ago
+    assert outcome_["too_early"] is False and fetch.asked and outcome_["done"] is True
+
+
+def test_a_day_with_no_games_is_not_called_too_early(day_of_games):
+    outcome_ = recap.evaluate(storage.data_dir(), date(2026, 11, 20), at("2026-11-21T02:00:00"),
+                              fetch=counting({}), start_within=30)
+    assert outcome_["too_early"] is False and outcome_["waiting"] is False
+
+
+# ---- the loop: hours too early means exit, close to the time means wait here ----
+
+def test_when_the_last_game_is_hours_from_possible_it_exits_at_once_instead_of_idling(watch):
+    last = watch(early(180), finished(), keep_waiting=300, start_within=30)
+    assert last["too_early"] is True and len(watch.looks) == 1 and watch.clock.sleeps == []
+    assert watch.looks[0]["start_within"] == 30
+    assert watch.reports == [last]
+
+
+def test_when_the_time_is_close_it_waits_here_so_it_is_already_running_when_the_time_comes(watch):
+    last = watch(early(20), early(20), early(20), waiting(), finished(), keep_waiting=300, start_within=30)
+    assert last == finished() and len(watch.looks) == 5 and watch.clock.sleeps == [180, 180, 180, 180]
+
+
+def test_exactly_the_start_within_margin_still_waits_but_one_minute_more_exits(watch):
+    assert watch(early(30), finished(), keep_waiting=300, start_within=30) == finished()
+    assert len(watch.looks) == 2 and watch.clock.sleeps == [180]
+
+
+def test_one_minute_beyond_the_margin_exits(watch):
+    assert watch(early(31), finished(), keep_waiting=300, start_within=30)["too_early"] is True
+    assert len(watch.looks) == 1 and watch.clock.sleeps == []
+
+
+@pytest.fixture
+def smart(monkeypatch, day_of_games):
+    """The command with fake time (starting at `base`), a fake Telegram and a fake score source that remembers when
+    it was asked. Returns (start, sent, asked): call start(base_time) before running the command."""
+    sent, asked, clock = [], [], Clock()
+    state = {"base": NOW_EVENING}
+
+    class Now(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return (state["base"] + timedelta(seconds=clock.elapsed())).astimezone(tz)
+
+    def collect(key, days):
+        asked.append((key, clock.elapsed()))
+        return "test", ALL_FINAL.get(key, [])
+
+    monkeypatch.setattr(recap, "datetime", Now)
+    monkeypatch.setattr(recap.time, "monotonic", clock)
+    monkeypatch.setattr(recap.time, "sleep", clock.sleep)
+    monkeypatch.setattr(telegram_bot, "send_message", sent.append)
+    monkeypatch.setattr(results, "collect", collect)
+    monkeypatch.setattr(telegram_bot, "BOT_TOKEN", "999:SECRET-TOKEN")
+
+    def start(base):
+        state["base"] = base
+        return clock
+    return start, sent, asked
+
+
+def test_the_command_exits_at_once_two_hours_before_the_last_game_could_be_final(smart, capsys, tmp_path):
+    start, sent, asked = smart
+    clock = start(NOW_EVENING)                                            # 8:30 PM
+    marker = tmp_path / "recap.marker"
+    args = ["--date", "2026-11-08", "--marker-file", str(marker), "--keep-waiting", "300", "--start-within", "30"]
+    assert recap.main(args) == 0
+    assert asked == [] and sent == [] and not marker.exists() and clock.sleeps == []
+    captured = capsys.readouterr()
+    assert "too early to ask for scores" in captured.out
+    assert "not time to start yet; a later run begins checking at about 10:30 PM CT" in captured.err
+
+
+def test_fifteen_minutes_before_the_time_it_waits_then_asks_then_sends_once(smart, capsys, tmp_path):
+    start, sent, asked = smart
+    clock = start(at("2026-11-09T04:15:00"))                              # 10:15 PM, check from 10:30 PM
+    marker = tmp_path / "recap.marker"
+    args = ["--date", "2026-11-08", "--marker-file", str(marker), "--keep-waiting", "300", "--start-within", "30"]
+    assert recap.main(args) == 0
+    assert clock.sleeps == [180] * 5                                      # 15 minutes of waiting, nothing asked meanwhile
+    assert min(elapsed for _, elapsed in asked) == 900                    # the first request is at exactly 10:30 PM
+    assert len(sent) == 1 and marker.exists()
+
+
+def test_smart_start_rejects_a_negative_margin():
+    with pytest.raises(SystemExit) as stopped:
+        recap.main(["--date", "2026-11-08", "--start-within", "-1"])
+    assert stopped.value.code == 2
