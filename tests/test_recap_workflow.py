@@ -1,5 +1,6 @@
-"""Guards for the results-recap workflow: schedule, secret separation, and the "already sent" marker."""
+"""Guards for the results-recap workflow: schedule, secret separation, the "already sent" marker, and staying alive."""
 
+import re
 from pathlib import Path
 
 import yaml
@@ -26,10 +27,10 @@ def test_the_workflow_file_is_valid_and_has_the_expected_triggers():
     assert triggers["workflow_dispatch"]["inputs"]["date"]["default"] == ""
 
 
-def test_it_wakes_every_20_minutes_but_never_at_the_top_of_the_hour_and_covers_the_window_in_both_seasons():
+def test_the_timer_is_a_safety_net_every_30_minutes_never_at_the_top_of_the_hour_and_covers_the_window_in_both_seasons():
     cron = (WORKFLOW.get("on") or WORKFLOW.get(True))["schedule"][0]["cron"]
     minutes, hours = cron.split()[:2]
-    assert minutes == "7,27,47"                                    # GitHub is busiest at :00
+    assert minutes == "7,37"                                       # GitHub is busiest at :00
     run_hours = set()
     for part in hours.split(","):
         low, _, high = part.partition("-")
@@ -38,9 +39,33 @@ def test_it_wakes_every_20_minutes_but_never_at_the_top_of_the_hour_and_covers_t
     assert {23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15} == run_hours
 
 
-def test_it_can_only_read_the_code_and_never_runs_two_copies_at_once():
+def test_it_can_only_read_the_code_and_never_runs_two_timer_started_copies_at_once():
     assert WORKFLOW["permissions"] == {"contents": "read"}
-    assert WORKFLOW["concurrency"] == {"group": "results-recap", "cancel-in-progress": False}
+    concurrency = WORKFLOW["concurrency"]
+    assert concurrency["cancel-in-progress"] is False             # a running night is never cut short by a newer run
+    group = concurrency["group"]
+    # Timer runs share one group (so they queue instead of both sending); a manual run gets its own group so the
+    # "Run workflow" button never waits behind a night of checking.
+    assert "github.event_name == 'schedule' && 'results-recap'" in group
+    assert "results-recap-manual-{0}', github.run_id" in group
+
+
+def test_the_job_is_two_parts_one_after_the_other_so_it_can_stay_alive_all_night_without_the_timer():
+    job = WORKFLOW["jobs"]["recap"]
+    strategy = job["strategy"]
+    assert strategy["max-parallel"] == 1 and strategy["fail-fast"] is False
+    parts = strategy["matrix"]["part"]
+    assert "'[1, 2]'" in parts and "github.event_name == 'schedule'" in parts and parts.endswith("'[1]') }}")   # a manual run is one part
+    assert "matrix.part" in job["name"]
+
+
+def test_each_part_checks_for_less_than_its_time_limit_and_the_limit_is_under_githubs_six_hours():
+    limit = WORKFLOW["jobs"]["recap"]["timeout-minutes"]
+    assert 300 <= limit < 360                                      # GitHub stops any job at 6 hours (360 minutes)
+    keep_waiting = float(re.search(r"--keep-waiting (\d+)", step("Send the recap")["run"]).group(1))
+    assert keep_waiting >= 300                                     # two parts cover 6 PM to about 5:30 AM
+    assert keep_waiting + 15 <= limit                              # room for checkout, installing and the data download
+    assert 2 * keep_waiting >= 9 * 60                              # past the latest give-up time of a night (about 3:30 AM)
 
 
 def test_steps_run_in_the_right_order():
@@ -76,10 +101,11 @@ def test_nothing_from_a_person_is_pasted_into_a_shell_command():
     assert 'recap_gate.py "$EVENT" "$REQUESTED_DAY"' in step("Is it time to look?")["run"]
 
 
-def test_scheduled_runs_wait_for_the_last_game_and_leave_a_marker_but_manual_runs_send_what_is_final():
+def test_scheduled_runs_keep_watching_for_the_last_game_and_leave_a_marker_but_manual_runs_send_what_is_final():
     run = step("Send the recap")["run"]
     scheduled, manual = run.split("else")
     assert "--marker-file recap.marker" in scheduled and "--no-wait" not in scheduled
+    assert "--keep-waiting" in scheduled and "--keep-waiting" not in manual     # a manual run answers at once
     assert "--no-wait" in manual and "--marker-file" not in manual
     assert "--data-dir data-repo" in run
 

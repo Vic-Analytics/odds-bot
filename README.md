@@ -94,7 +94,7 @@ flowchart LR
     subgraph cloud["GitHub Actions (free)"]
         digest["Daily digest<br/>hourly, 7 AM-2 PM window"]
         results["Results job<br/>every morning"]
-        recap["Results recap<br/>every 20 min, 6 PM-10 AM"]
+        recap["Results recap<br/>checks every 3 min from 6 PM"]
     end
 
     subgraph store["Private repo"]
@@ -187,10 +187,10 @@ When the last game of the day has finished, a second message arrives: one sectio
 Favorite: 🏔️ Colorado Avalanche 61% · ✅ Favorite won
 ```
 
-- **How it knows the last game is over:** nothing announces it, so a workflow (`recap.yml`) wakes up every 20 minutes from 6 PM to 10 AM Central. Each run downloads that day's odds from the private data repo, asks the free score sources (ESPN, MLB, NHL) for the finals, and either says "still waiting on 3 games" and stops, or sends the recap and leaves a marker so it is sent once. It costs no Odds API credits.
+- **How it knows the last game is over:** nothing announces it, so the first scheduled run after 6 PM Central (`recap.yml`) stays alive and checks every 3 minutes until the last game is final. It downloads that day's odds from the private data repo once, then keeps asking the free score sources (ESPN, MLB, NHL) for the finals. Each time it either says "still waiting on 3 games" and looks again in 3 minutes, or sends the recap and leaves a marker so it is sent once. It costs no Odds API credits.
 - **A day is 10 AM to 10 AM:** a game that starts at 9 PM and ends at 12:30 AM still belongs to the day it started on (`recap_gate.py`).
 - **A postponed game cannot hold it up:** a game with no final score 5 hours after its start is skipped. Games missing a score or odds are skipped quietly, and a day with no finished games sends nothing.
-- **How close to "right after":** GitHub starts scheduled runs late, often 30 to 60 minutes, so expect the recap roughly 20 to 80 minutes after the last final whistle. An always-on server would be faster; this stays free and needs no machine of my own.
+- **How close to "right after":** within a few minutes of the last final score. An earlier version woke up every 20 minutes and relied on GitHub's timer, but that timer is best effort: it really ran about once an hour, and on Nov 11 it started nothing for nine hours, so a recap that was minutes away arrived at 9 AM instead. Now one run stays alive instead of depending on the timer. A job can live 6 hours at most, so two parts run back to back (6 PM to about 5:30 AM). The timer still starts a run every 30 minutes as a safety net: if a night ever goes wrong, the recap is sent the next morning, and an extra run that finds the "already sent" marker does nothing. **Cost:** about 5 hours of Actions time a night, which is free while this repository is public. A private repository gets only 2,000 free minutes a month, which this would use up, so make it private only if you change this first.
 - **The secrets are split:** one step uses the deploy key only to download the data, and the next uses the Telegram token only to send.
 - **Try it safely on your computer** (nothing is sent, no credits are used; it needs a clone of the data repo, see "Analysis"):
 
@@ -238,7 +238,7 @@ Favorite: 🏔️ Colorado Avalanche 61% · ✅ Favorite won
 | `tests/` | Automated tests (fake data only, no network) |
 | `.github/workflows/daily-odds.yml` | The schedule and cloud job |
 | `.github/workflows/results.yml` | Daily job that saves final scores to the private data repo |
-| `.github/workflows/recap.yml` | Every 20 minutes in the evening: sends the recap when the last game has finished |
+| `.github/workflows/recap.yml` | Starts in the evening and keeps checking every 3 minutes: sends the recap when the last game has finished |
 | `.github/workflows/tests.yml` | Runs the tests on every push and pull request |
 | `analysis/` | Read-only analysis tools: the dashboard, its calculations (`stats.py`), SQL, a loader, a starter notebook and the fake-data generator (`demo_data.py`) |
 | `docs/` | The public demo page (`index.html`, built from fake data) and its screenshot |
