@@ -92,7 +92,7 @@ flowchart LR
     end
 
     subgraph cloud["GitHub Actions (free)"]
-        digest["Daily digest<br/>hourly, 7 AM-2 PM window"]
+        digest["Daily digest<br/>hourly, 7 AM-5 PM window"]
         results["Results job<br/>every morning"]
         recap["Results recap<br/>checks every 3 min from about 10 PM"]
     end
@@ -130,10 +130,10 @@ flowchart LR
 The daily digest in more detail:
 
 ```
-GitHub Actions (cron: every hour at :15, 12:15-19:15 UTC)
+GitHub Actions (cron: every hour at :15, 12:15-22:15 UTC)
         │
         ▼
-   gate.py  ── inside the 7 AM-2 PM Central window? already sent today? (else stop)
+   gate.py  ── inside the 7 AM-5 PM Central window? already sent today? (else stop)
         │
         ▼
    main.py  ── fetch, format, send, and leave a "sent today" marker
@@ -154,7 +154,7 @@ GitHub's cron runs on UTC, which doesn't follow daylight saving, and GitHub star
 
 The fix is to stop depending on one moment:
 
-1. The workflow starts every hour at 15 minutes past, from 12:15 to 19:15 UTC. That covers 7:15 AM to 2 PM Central in both summer and winter. GitHub is busiest at the top of the hour and recommends avoiding :00, so the schedule uses :15.
+1. The workflow starts every hour at 15 minutes past, from 12:15 to 22:15 UTC. That covers 7:15 AM to 5 PM Central in both summer and winter. GitHub is busiest at the top of the hour and recommends avoiding :00, so the schedule uses :15.
 2. `gate.py` lets a run through only if it is inside that window. The first run inside it sends the digest.
 3. `main.py` then writes a small marker, which the workflow saves in GitHub's cache under today's date. Later runs find the marker and do nothing, so you get one digest a day.
 4. If a run is late or fails completely, the next hour's run covers it. A concurrency lock stops two runs from sending at once.
@@ -187,11 +187,11 @@ When the last game of the day has finished, a second message arrives: one sectio
 Favorite: 🏔️ Colorado Avalanche 61% · ✅ Favorite won
 ```
 
-- **How it knows the last game is over:** nothing announces it, so a run of `recap.yml` stays alive and checks the free score sources (ESPN, MLB, NHL) every 3 minutes until the last game is final, then sends the recap and leaves a marker so it is sent once. **Smart start:** no game is final sooner than 90 minutes after it starts, so each night the recap works out the earliest the last game could end (the latest game start plus 90 minutes: 10:40 PM on most nights) and does not ask for scores before that. A run that starts hours too early exits after about a minute, and one that starts within 30 minutes of that time stays and waits. It costs no Odds API credits.
+- **How it knows the last game is over:** nothing announces it, so a run of `recap.yml` stays alive and checks the free score sources (ESPN, MLB, NHL) every 3 minutes until the last game is final, then sends the recap and leaves a marker so it is sent once. **Smart start:** no game is final sooner than 90 minutes after it starts, so each night the recap works out the earliest the last game could end (the latest game start plus 90 minutes: 10:40 PM on most nights) and does not ask for scores before that. A run that starts more than 2 hours before that time (before about 8:40 PM) exits after about a minute; one that starts closer stays and waits in the job. It costs no Odds API credits.
 - **A day is 10 AM to 10 AM:** a game that starts at 9 PM and ends at 12:30 AM still belongs to the day it started on (`recap_gate.py`).
 - **A postponed game cannot hold it up:** a game with no final score 5 hours after its start is skipped. Games missing a score or odds are skipped quietly, and a day with no finished games sends nothing.
-- **How close to "right after":** within a few minutes of the last final score. An earlier version woke up every 20 minutes and relied on GitHub's timer, but that timer is best effort: it really ran about once an hour, and on Nov 11 it started nothing for nine hours, so a recap that was minutes away arrived at 9 AM instead. Now the run that starts at the right time stays alive instead of depending on the timer again. The timer still starts a run every 30 minutes (every 10 minutes from about 9 PM to 2 AM, when it matters) to give GitHub many chances, and it is the safety net that sends a missed recap the next morning; an extra run that finds the "already sent" marker does nothing.
-- **What it costs:** GitHub Actions time, which is free while this repository is public. Checking all evening would take about 6 hours a night (roughly 170 hours a month). Smart start takes about 1 to 2.5 hours a night (from about 10:10 PM until the last final) plus about a minute for each early run that exits, roughly 60 hours a month. A private repository gets 2,000 free minutes (about 33 hours) a month, which even this would exceed, so make it private only if you change this first. The risk of smart start is that the run that matters must be started by GitHub's timer: if it skips every attempt from about 10 PM to the finish, the recap arrives the next morning, and the missed-recap alarm below tells you.
+- **How close to "right after":** within a few minutes of the last final score, as long as GitHub starts one run in the evening. An earlier version woke up every 20 minutes and relied on GitHub's timer; on Nov 11 the timer started nothing for nine hours and the recap arrived at 9 AM. The next version waited only 30 minutes before the earliest finish, so on Nov 12 its single evening run (at 9:21 PM, 79 minutes early) exited and nothing ran again until 4:40 AM. Now a run that starts up to 2 hours early waits in the job. The timer still starts a run every 30 minutes (GitHub runs it at most once an hour) and it is the safety net that sends a missed recap the next morning; an extra run that finds the "already sent" marker does nothing.
+- **What it costs:** GitHub Actions time, which is free while this repository is public. Checking all evening would take about 6 hours a night (roughly 170 hours a month). Smart start with the 2-hour margin takes about 3 to 4 hours a night (from about 8:40 PM until the last final), roughly 100 hours a month, plus about a minute for each early run that exits. A private repository gets 2,000 free minutes (about 33 hours) a month, which this would exceed, so make it private only if you change this first. The remaining risk: the run that does the waiting must be started by GitHub's timer, which is not guaranteed (see below). If it never is, the recap arrives the next morning and the missed-recap alarm tells you at 4 AM.
 - **The secrets are split:** one step uses the deploy key only to download the data, and the next uses the Telegram token only to send.
 - **Try it safely on your computer** (nothing is sent, no credits are used; it needs a clone of the data repo, see "Analysis"):
 
@@ -204,6 +204,16 @@ Favorite: 🏔️ Colorado Avalanche 61% · ✅ Favorite won
   Run these from the project folder with the project's own Python, as above. A plain `python` is your computer's general Python and does not have the libraries (the error is `No module named 'dotenv'`).
 
   In the cloud, Actions, Results recap, Run workflow sends a recap right away for whatever is final.
+
+### When GitHub's timer fails
+
+Everything in this project that happens on a schedule starts from GitHub's cron timer, and the timer is the weakest link. What I measured:
+
+- **At most one scheduled run an hour per workflow.** On Nov 10 the recap had two slots an hour and got exactly one run in each of 17 hours; the digest got one. More cron slots do not add runs, so there is nothing to gain from listing more.
+- **Late starts:** typically 5 to 70 minutes, sometimes 2 hours or more (the 12:15 slot at 13:25 UTC; the 19:15 slot at 21:28 UTC).
+- **Bad days:** from Nov 12 the timer started far fewer runs for the whole GitHub account, not just this repository. The digest got 2 runs on Nov 12 and none on Nov 13, the recap 4 runs in 26 hours, and an unrelated hourly collector in another repository fell from about 20 runs a day to 8 and then 2. GitHub's status page showed no incident for it.
+- **What the project does about it:** the digest window is wide (7 AM to 5 PM) so a late run still sends; the recap checker waits in the job so one evening run is enough; both have an alarm on healthchecks.io that tells you from outside GitHub; and a manual **Run workflow** sends the digest by hand and leaves the "sent today" marker so no duplicate follows.
+- **What it cannot do:** if GitHub starts no run at all, nothing inside this repository can start one. The only real cure is a second trigger that is not GitHub's timer, for example a free cron service that calls GitHub's API on time with a narrow token. That is not set up, because it means storing a token with a third-party service.
 
 ### Missed-recap alarm
 
@@ -334,7 +344,7 @@ GitHub runs the same tests on every push using `.github/workflows/tests.yml`. Th
 
 1. Push this repo to GitHub.
 2. Go to **Settings → Secrets and variables → Actions** and add three repository secrets: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` and `ODDS_API_KEY`.
-3. Open the **Actions** tab, choose **Daily odds digest**, and click **Run workflow** to test. After that it runs by itself every day, sending at the first scheduled run after 7 AM Central (the first slot is 7:15 AM; GitHub's late starts push it later, and a run can send any time up to 2 PM). A manual run always sends immediately.
+3. Open the **Actions** tab, choose **Daily odds digest**, and click **Run workflow** to test. After that it runs by itself every day, sending at the first scheduled run after 7 AM Central (the first slot is 7:15 AM; GitHub's late starts push it later, and a run can send any time up to 5 PM). A manual run always sends immediately, and leaves the "sent today" marker, so a late timer run does not send it a second time.
 
 ## Configuration
 
@@ -360,7 +370,7 @@ Emoji are matched by team name, so most things need no changes. A few events nee
 - The API's MMA feed mixes UFC with other promotions and offers no promotion field. `MIN_BOOKMAKERS` trims low-coverage fights but can't isolate UFC perfectly, and the fighter flags are a hand-kept list that will always lag behind new fighters.
 - A live score is a snapshot taken when the digest runs. The Telegram message does not update itself.
 - Kit colors can clash (two red teams in one game), and some newer emoji may not render on older phones.
-- GitHub may start scheduled runs late, so the digest usually arrives some 30 to 50 minutes after the 7:15 AM slot (around 8 AM Central), and in rare cases later (any time before 2 PM). If GitHub skipped every scheduled run in the window, nothing would be sent. On public repositories GitHub also pauses schedules after about 60 days without repository activity.
+- GitHub may start scheduled runs late, so the digest usually arrives some 30 to 50 minutes after the 7:15 AM slot (around 8 AM Central), and in rare cases later (any time before 5 PM). If GitHub skipped every scheduled run in the window, nothing would be sent; the missed-digest alarm tells you at 9 AM, and **Actions, Daily odds digest, Run workflow** sends it by hand. That is not hypothetical: see "When GitHub's timer fails" below. On public repositories GitHub also pauses schedules after about 60 days without repository activity.
 - The "sent today" marker lives in GitHub's cache, which can be evicted. In the unlikely event that happens mid-morning, a second digest could be sent.
 - Each sport shows spread or total, not both. Showing both for a sport would cost 1 more credit per sport per day.
 

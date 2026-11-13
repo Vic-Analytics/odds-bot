@@ -49,12 +49,9 @@ def test_the_timer_is_a_safety_net_every_30_minutes_never_at_the_top_of_the_hour
     assert {23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15} == hours_in(hours)
 
 
-def test_there_are_extra_attempts_every_10_minutes_when_the_last_game_of_the_night_finishes():
-    assert len(crons()) == 2
-    minutes, hours = crons()[1][:2]
-    assert minutes == "3,13,23,33,43,53" and "0" not in minutes.split(",")      # six an hour, never :00
-    # The usual finish (10:40 PM to 1 AM Central) is 04:40-07:00 UTC in winter and 03:40-06:00 UTC in summer.
-    assert hours_in(hours) >= {3, 4, 5, 6, 7}
+def test_there_is_one_schedule_entry_because_github_starts_at_most_one_run_an_hour_anyway():
+    # Nov 10: two slots an hour gave exactly one run an hour. Extra slots only add load and clutter.
+    assert len(crons()) == 1
 
 
 def test_it_can_only_read_the_code_and_never_runs_two_timer_started_copies_at_once():
@@ -89,9 +86,13 @@ def test_a_run_that_starts_in_time_can_always_wait_until_every_game_is_final_or_
     assert keep_waiting + 15 <= limit < 360                        # room for setup; GitHub stops any job at 6 hours
 
 
-def test_smart_start_has_a_margin_the_timer_can_realistically_hit():
+def test_smart_start_has_a_margin_that_a_once_an_hour_timer_cannot_step_over():
     keep_waiting, start_within = watch_flags()
-    assert 20 <= start_within <= 45          # GitHub starts the timer about hourly: too small a margin misses the night
+    # GitHub starts at most one run an hour, 5 to 70 minutes late. On Nov 12 the only evening run came 79 minutes
+    # before the earliest possible finish; a 30-minute margin made it exit and nothing ran again until 4:40 AM.
+    assert start_within >= 90
+    # ...but the margin cannot be so wide that the longest wait no longer fits into one job (see the next test).
+    assert start_within <= 150
 
 
 def test_the_key_file_is_private_and_deleted_after_the_download():

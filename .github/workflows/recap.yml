@@ -2,39 +2,45 @@
 #
 # How it works (and why it is built this way):
 #   Games run from the afternoon until after midnight Central, and nothing tells us
-#   "the last game just ended". Two facts shape the design:
+#   "the last game just ended". Three facts shape the design:
 #     * No game is final sooner than 90 minutes after it starts, so the recap cannot be
 #       ready before the day's LATEST game start plus 90 minutes (10:40 PM on most nights).
-#       Before that there is nothing to check, so a run that starts too early exits after
-#       about a minute instead of idling (smart start, recap.py --start-within 30).
-#     * GitHub's timer is best effort. It really starts this about once an hour, and on
-#       Nov 11 it started nothing for nine hours, so a recap that was a few minutes away
-#       arrived at 9 AM. So the run that starts at the right time does NOT hand over to a
-#       later timer run: it stays alive and checks the scores every 3 minutes until the last
-#       game is final. Games with no final score 5 hours after their start are given up on,
-#       so this never lasts more than about 4 hours.
+#       Before that there is nothing to check.
+#     * GitHub's timer is far weaker than its cron line suggests. It runs a workflow's
+#       schedule at most ONCE AN HOUR however many slots are listed (the recap had two
+#       or three slots an hour and got one run an hour), starts that run 5 to 70 minutes
+#       late, and on Nov 12-13 2026 it started almost nothing, for this whole account:
+#       the recap got 4 runs in 26 hours and the digest none. So the run that does start
+#       must not hand over to a later timer run: it stays alive and checks the scores
+#       every 3 minutes until the last game is final.
+#     * A job may live 6 hours, and a game with no final score 5 hours after its start is
+#       given up on. A run that starts 2 hours before the earliest possible finish waits
+#       in the job until then and finishes within 5.5 hours, so the limit never bites.
+#   That is "smart start" (recap.py --start-within 120):
+#     * a run that starts MORE than 2 hours before the earliest possible finish (before
+#       about 8:40 PM on most nights) exits after about a minute: a later timer run will
+#       come closer to the time;
+#     * a run that starts within 2 hours of it, or later, stays and does the waiting.
+#   Last night's failure is why the margin is 2 hours and not 30 minutes: the only evening
+#   run came at 9:21 PM, 79 minutes early, exited, and nothing ran again until 4:40 AM.
 #   Each run does this:
 #     1. recap_gate.py: is it inside the window (6 PM to 10 AM Central), and which day is
 #        this recap for? (A recap day runs from 10 AM to 10 AM, so a game that ends at
 #        12:30 AM still belongs to the day it started on.)
 #     2. Was that day's recap already sent? A small marker in GitHub's cache says so.
-#     3. recap.py downloads the day's odds from the private data repo, then:
-#          - too early for the last game to be final: exits (a later timer run starts the wait);
-#          - within 30 minutes of that, or later: asks the FREE score sources (ESPN, MLB, NHL)
-#            for the finals every 3 minutes, and sends the recap once everything is final.
+#     3. recap.py downloads the day's odds from the private data repo, then waits if it is
+#        early (see above) and asks the FREE score sources (ESPN, MLB, NHL) for the finals
+#        every 3 minutes, and sends the recap once everything is final.
 #     4. Once the recap is done (sent, or nothing to report) it writes the marker, then pings
 #        healthchecks.io, which alerts you if that ping has not arrived by 4 AM Central.
 #
-#   The timer starts a run every 30 minutes all night, and every 10 minutes through the hours
-#   when the last game finishes, to give GitHub many chances to start the one that matters.
-#   It is also the safety net that sends last night's recap in the morning if a night went
-#   wrong. Extra runs wait in line (see "concurrency") and then see the marker, so nothing
-#   is sent twice.
+#   The timer keeps starting a run every 30 minutes all night. It is also the safety net that
+#   sends last night's recap in the morning if a night went wrong. Extra runs wait in line
+#   (see "concurrency") and then see the marker, so nothing is sent twice.
 #
-#   It costs no Odds API credits. Staying alive from about 10:10 PM until the last final
-#   (usually 1 to 2 hours) is far less Actions time than checking all evening, and it is free
-#   while this repository is public. For a private repository (2,000 free minutes a month)
-#   it is still too much.
+#   It costs no Odds API credits. Staying alive from about 8:40 PM until the last final is
+#   usually 3 to 4 hours of Actions time a night, free while this repository is public. For a
+#   private repository (2,000 free minutes a month) it would not fit.
 #
 # The secrets are split between steps: the deploy key only downloads the data, the Telegram
 # token only sends the message, and the recap's healthchecks.io URL only pings. None of those
@@ -46,11 +52,8 @@ on:
   schedule:
     # Every 30 minutes (:07 and :37: GitHub is busiest at :00) from 23:00 to 15:59 UTC.
     # That covers 6 PM to 10 AM Central in summer and winter; recap_gate.py makes the
-    # exact decision, daylight saving included.
+    # exact decision, daylight saving included. (GitHub starts at most one run an hour.)
     - cron: "7,37 23,0-15 * * *"
-    # Extra attempts every 10 minutes from 03:00 to 07:59 UTC: about 9 PM to 2 AM Central in
-    # winter and 10 PM to 3 AM in summer, when the day's last game is about to finish.
-    - cron: "3,13,23,33,43,53 3-7 * * *"
   # Adds a "Run workflow" button. A manual run sends right away whatever is final
   # (even if some games are still going) and ignores the "already sent" marker.
   workflow_dispatch:
@@ -74,9 +77,10 @@ concurrency:
 jobs:
   recap:
     runs-on: ubuntu-latest
-    # A job may run 6 hours at most. A run that starts when it should finishes within about 4
-    # hours (games are given up on after 5 hours); --keep-waiting 300 and this limit are backstops.
-    timeout-minutes: 330
+    # A job may run 6 hours at most. A run that starts in time finishes within 5.5 hours
+    # (2 hours of waiting for the earliest finish, then up to 3.5 hours until every game is final
+    # or given up on); --keep-waiting 335 and this limit are backstops just under 6 hours.
+    timeout-minutes: 355
 
     steps:
       - uses: actions/checkout@v4
@@ -123,9 +127,9 @@ jobs:
 
       # Check the scores and, if the day is finished, send the recap. Only the Telegram
       # secrets are used here. A scheduled run exits at once if the last game cannot be final
-      # yet (--start-within 30); otherwise it keeps checking every 3 minutes for up to 5 hours
-      # (--keep-waiting 300), then writes recap.marker once the day needs no more checking.
-      # A manual run (--no-wait) sends what is final now.
+      # for more than 2 hours yet (--start-within 120); otherwise it waits for that time and then
+      # keeps checking every 3 minutes (--keep-waiting 335), and writes recap.marker once the day
+      # needs no more checking. A manual run (--no-wait) sends what is final now.
       - name: Send the recap if the last game has finished
         if: steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true'
         env:
@@ -135,7 +139,7 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           if [ "$EVENT" = "schedule" ]; then
-            python recap.py --data-dir data-repo --date "$RECAP_DAY" --marker-file recap.marker --keep-waiting 300 --start-within 30
+            python recap.py --data-dir data-repo --date "$RECAP_DAY" --marker-file recap.marker --keep-waiting 335 --start-within 120
           else
             python recap.py --data-dir data-repo --date "$RECAP_DAY" --no-wait
           fi

@@ -108,3 +108,28 @@ def test_the_days_input_reaches_the_script_through_an_environment_variable():
     # Not pasted straight into the shell command, which would allow command injection.
     assert 'DAYS: ${{ inputs.days || \'2\' }}' in RESULTS
     assert '--days "$DAYS"' in RESULTS
+
+
+# ---------- a manual run leaves the "sent today" marker, so a late timer run cannot send it again ----------
+
+def test_every_run_writes_the_marker_after_the_digest_not_just_scheduled_ones():
+    send_start = position("- name: Send the digest")
+    send = WORKFLOW[send_start:WORKFLOW.index("# 5b.", send_start)]
+    assert "python main.py --marker-file sent.marker" in send
+    assert "github.event_name" not in send.split("run:")[1].split("env:")[0]       # the command no longer depends on the trigger
+
+
+def test_the_marker_is_saved_for_manual_runs_too_and_only_when_the_digest_wrote_one():
+    start = position("- name: Remember that today's digest was sent")
+    block = WORKFLOW[start:]
+    condition = next(line for line in block.splitlines() if line.strip().startswith("if:"))
+    assert "github.event_name" not in condition                              # a manual run saves it as well
+    assert "hashFiles('sent.marker') != ''" in condition                      # a run where everything failed leaves nothing
+    assert "steps.gate.outputs.go == 'true'" in condition and "steps.already.outputs.cache-hit != 'true'" in condition
+
+
+def test_a_manual_run_still_ignores_an_existing_marker_and_always_sends():
+    start = position("- name: Was today's digest already sent?")
+    block = WORKFLOW[start:position("# 4.")]
+    condition = next(line for line in block.splitlines() if line.strip().startswith("if:"))
+    assert "github.event_name == 'schedule'" in condition                    # only timer runs read the marker
