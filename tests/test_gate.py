@@ -22,24 +22,26 @@ def go(when, event="schedule"):
 
 # ---------- the window itself ----------
 
-def test_the_window_is_7_am_to_2_pm_central():
-    assert (SEND_FROM_HOUR, SEND_UNTIL_HOUR) == (7, 14)
+def test_the_window_is_7_am_to_5_pm_central():
+    # It used to end at 2 PM. On Nov 12-13 2026 GitHub started almost no scheduled runs (one digest run came at
+    # 3:28 PM, the next day's none at all), so a late brief now beats no brief.
+    assert (SEND_FROM_HOUR, SEND_UNTIL_HOUR) == (7, 17)
 
 
 def test_summer_window_edges():
     # In July Central is UTC-5, so 7:00 CDT is 12:00 UTC.
     assert go(utc(2026, 7, 15, 11, 59)) is False    # 6:59 AM
     assert go(utc(2026, 7, 15, 12, 0)) is True      # 7:00 AM
-    assert go(utc(2026, 7, 15, 18, 59)) is True     # 1:59 PM
-    assert go(utc(2026, 7, 15, 19, 0)) is False     # 2:00 PM
+    assert go(utc(2026, 7, 15, 21, 59)) is True     # 4:59 PM
+    assert go(utc(2026, 7, 15, 22, 0)) is False     # 5:00 PM
 
 
 def test_winter_window_edges():
     # In January Central is UTC-6, so 7:00 CST is 13:00 UTC.
     assert go(utc(2026, 1, 15, 12, 59)) is False    # 6:59 AM
     assert go(utc(2026, 1, 15, 13, 0)) is True      # 7:00 AM
-    assert go(utc(2026, 1, 15, 19, 59)) is True     # 1:59 PM
-    assert go(utc(2026, 1, 15, 20, 0)) is False     # 2:00 PM
+    assert go(utc(2026, 1, 15, 22, 59)) is True     # 4:59 PM
+    assert go(utc(2026, 1, 15, 23, 0)) is False     # 5:00 PM
 
 
 def test_a_manual_run_always_goes_at_any_hour():
@@ -89,8 +91,32 @@ def test_on_time_runs_first_go_at_exactly_7_15_central(year, month, day):
 
 
 @pytest.mark.parametrize("year, month, day", SEASON_DAYS)
-def test_even_if_github_starts_every_run_up_to_4_hours_late_some_run_is_in_the_window(year, month, day):
+def test_even_if_github_starts_every_run_up_to_6_hours_late_some_run_is_in_the_window(year, month, day):
     minute, hours = scheduled_slots()
-    for delay_minutes in range(0, 241, 5):
+    for delay_minutes in range(0, 361, 5):
         starts = [utc(year, month, day, h, minute) + timedelta(minutes=delay_minutes) for h in hours]
         assert any(go(when) for when in starts), f"no run inside the window with a {delay_minutes}-minute delay"
+
+
+def test_the_nov_12_digest_run_that_came_2_hours_13_minutes_late_would_now_send():
+    # The 19:15 UTC slot on Nov 12 was started at 21:28 UTC (3:28 PM Central). The old window ended at 2 PM, so the gate
+    # turned it away; today's brief was then lost altogether when GitHub started no run at all.
+    assert go(utc(2026, 11, 12, 21, 28)) is True
+    assert go(utc(2026, 11, 12, 22, 59)) is True                         # 4:59 PM CST
+    assert go(utc(2026, 11, 12, 23, 0)) is False                         # 5:00 PM CST: past the window
+
+
+@pytest.mark.parametrize("year, month, day", SEASON_DAYS)
+def test_the_cron_covers_the_whole_window_in_both_seasons(year, month, day):
+    minute, hours = scheduled_slots()
+    covered = {h for h in range(24) if h in hours}
+    for hour in range(24):                                              # every hour of the day, at :15
+        if go(utc(year, month, day, hour, minute)):
+            assert hour in covered, f"{hour}:{minute:02d} UTC is inside the window but has no cron slot"
+
+
+def test_no_cron_slot_is_wasted_after_the_window_closes_in_every_season():
+    minute, hours = scheduled_slots()
+    # The last slot must be useful in at least one season (in the other it may fall just after the window).
+    assert any(go(utc(y, m, d, max(hours), minute)) for y, m, d in SEASON_DAYS)
+    assert not any(go(utc(y, m, d, max(hours) + 1, minute)) for y, m, d in SEASON_DAYS)      # one more would never be used

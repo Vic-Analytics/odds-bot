@@ -10,9 +10,9 @@ are for the first 90 minutes, so a soccer game that went to extra time counts as
     python recap.py --dry-run --no-wait       print what is final right now, even if games are still going
     python recap.py --data-dir ..\\odds-history-data      the folder that holds raw/ (a clone of the private data repo)
 
-    python recap.py --keep-waiting 300 --start-within 30
+    python recap.py --keep-waiting 335 --start-within 120
                                               the cloud's command: keep checking every 3 minutes until the last game is
-                                              final, but only start once that could be within 30 minutes (smart start)
+                                              final, but only start once that could be within 2 hours (smart start)
 
 How it works (the cloud workflow starts this in the evening and lets it keep checking):
   1. Build a small temporary database from the odds files for that day (the morning
@@ -27,8 +27,10 @@ How it works (the cloud workflow starts this in the evening and lets it keep che
      reported by the source) and no longer holds the recap up.
      Smart start (--start-within): no game is final sooner than 90 minutes after it starts,
      so before the day's latest start plus 90 minutes (10:40 PM on most nights) it does not
-     even ask the score sources, and a run that is hours too early just exits instead of
-     idling: that saves most of the GitHub Actions time.
+     even ask the score sources, and a run that is more than 2 hours too early just exits
+     instead of idling. A run that is closer waits in the job until then, so it is already
+     running when the time comes: GitHub starts at most one timer run an hour (and on
+     Nov 12-13 almost none), so a run that starts early must not give up its place.
   4. Once everything is final, send the recap and write the marker file, so the workflow
      does not send it twice.
 
