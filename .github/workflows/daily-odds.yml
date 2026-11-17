@@ -5,14 +5,18 @@
 #   GitHub starts scheduled runs LATE, often by 30-50 minutes and sometimes
 #   by hours, and its cron times are in UTC (no daylight saving). A single
 #   "run at exactly 8 AM" job therefore misses days. Instead:
-#     1. The job starts every hour, at 15 minutes past (12:15-22:15 UTC covers
-#        7:15 AM-5 PM Central in both summer and winter). GitHub is busiest at
+#     1. The job starts every hour, at 15 minutes past (07:15-22:15 UTC covers
+#        2:15 AM-5 PM Central in both summer and winter). GitHub is busiest at
 #        the top of the hour, and it recommends avoiding :00, so we use :15.
 #        (GitHub runs a workflow's timer at most once an hour however many
 #        slots it has, so one slot an hour is all there is to use. On Nov 12-13
 #        2026 it started almost none at all, so the window runs until 5 PM:
 #        a late brief beats no brief.)
-#     2. gate.py checks if it is between 7 AM and 5 PM Central.
+#     2. gate.py checks if it is between 7 AM and 5 PM Central. A run that
+#        starts EARLIER (after 1:30 AM Central) is not turned away: it waits
+#        in the job until 7:00 AM and then sends. GitHub starts only about
+#        three scheduled runs a day now, at times it picks, and for the recap
+#        some of those come before dawn, so the cron also covers the night.
 #     3. The first run inside that window sends the digest and saves a small
 #        "sent today" marker. Later runs find the marker and do nothing.
 #     4. If a run is late or fails, the next hour's run covers it.
@@ -21,7 +25,7 @@ name: Daily odds digest
 
 on:
   schedule:
-    - cron: "15 12-22 * * *"
+    - cron: "15 7-22 * * *"
   # Adds a "Run workflow" button in the Actions tab, so you can test by hand, or
   # send the brief yourself when GitHub's timer did not. A manual run always sends
   # right away and ignores the daily marker, but it leaves the marker behind, so a
@@ -34,6 +38,10 @@ permissions:
 
 # Never run two copies at once, so two overlapping runs can't both send.
 # A waiting run starts after the first finishes and then sees its marker.
+# (One consequence: a run that started early and is waiting for 7:00 AM holds the line,
+# so a manual "Run workflow" pressed during that wait starts after it and ignores the
+# marker, which means you would get the brief twice. Before 7 AM there is no brief yet,
+# so the simple answer is not to press the button then.)
 concurrency:
   group: daily-odds-digest
   cancel-in-progress: false
@@ -41,7 +49,10 @@ concurrency:
 jobs:
   send-digest:
     runs-on: ubuntu-latest   # a temporary Linux machine in GitHub's cloud
-    timeout-minutes: 10      # safety net: stop the job if something hangs
+    # Safety net. A run that starts early waits up to 330 minutes for the window to open
+    # (see the wait step), and a job may run 6 hours at most. The send step has its own
+    # 10-minute limit, so a hang while sending is still cut off quickly.
+    timeout-minutes: 350
 
     steps:
       # 1. Download your repository's code onto the temporary machine.
@@ -75,6 +86,18 @@ jobs:
         if: steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true'
         run: pip install -r requirements.txt
 
+      # 4b. Early start: wait here until the send window opens at 7:00 AM Central. gate.py
+      #     says how long (0 for runs inside the window and for manual runs, which never
+      #     wait). Skipped when an earlier run already sent today's digest.
+      - name: Wait for the send window to open
+        if: steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true' && steps.gate.outputs.wait != '0'
+        timeout-minutes: 340
+        env:
+          WAIT_SECONDS: ${{ steps.gate.outputs.wait }}
+        run: |
+          echo "Waiting $WAIT_SECONDS seconds for the send window to open"
+          sleep "$WAIT_SECONDS"
+
       # 5. Run the bot. The secrets you stored on GitHub become environment
       #    variables with the same names as in your .env file, which is exactly
       #    where our code looks for them. main.py also writes sent.marker once
@@ -83,6 +106,7 @@ jobs:
       - name: Send the digest
         id: send
         if: steps.gate.outputs.go == 'true' && steps.already.outputs.cache-hit != 'true'
+        timeout-minutes: 10
         run: python main.py --marker-file sent.marker
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}

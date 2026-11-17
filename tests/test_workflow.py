@@ -133,3 +133,48 @@ def test_a_manual_run_still_ignores_an_existing_marker_and_always_sends():
     block = WORKFLOW[start:position("# 4.")]
     condition = next(line for line in block.splitlines() if line.strip().startswith("if:"))
     assert "github.event_name == 'schedule'" in condition                    # only timer runs read the marker
+
+
+# ---------- early start: a run before 7 AM waits in the job until the window opens ----------
+
+import re
+
+from config import EARLY_START_MINUTES
+
+
+def wait_block():
+    start = position("- name: Wait for the send window to open")
+    return WORKFLOW[start:WORKFLOW.index("# 5.", start)]
+
+
+def test_an_early_run_waits_after_installing_and_before_sending_but_only_when_it_is_going_to_send():
+    assert position("- name: Install requirements") < position("- name: Wait for the send window to open") < position("- name: Send the digest")
+    block = wait_block()
+    assert "steps.gate.outputs.go == 'true'" in block                       # never on runs the gate turned away
+    assert "steps.already.outputs.cache-hit != 'true'" in block             # never when today's digest was already sent
+    assert "steps.gate.outputs.wait != '0'" in block                        # never for runs inside the window and manual runs
+
+
+def test_the_wait_length_reaches_the_shell_through_an_environment_variable():
+    block = wait_block()
+    assert "WAIT_SECONDS: ${{ steps.gate.outputs.wait }}" in block
+    assert 'sleep "$WAIT_SECONDS"' in block
+    run_script = block.split("run: |")[1]
+    assert "${{" not in run_script                                          # nothing is pasted into the command
+
+
+def test_the_waiting_fits_in_the_time_limits_and_under_githubs_six_hours():
+    job_limit = int(re.search(r"^    timeout-minutes: (\d+)", WORKFLOW, re.M).group(1))
+    wait_limit = int(re.search(r"timeout-minutes: (\d+)", wait_block()).group(1))
+    assert wait_limit > EARLY_START_MINUTES                                 # the longest wait is allowed to finish
+    assert wait_limit + 5 <= job_limit < 360                                # room to install and send; GitHub stops jobs at 6 hours
+
+
+def test_sending_still_has_its_own_short_time_limit_so_a_hang_is_cut_off_quickly():
+    send = WORKFLOW[position("- name: Send the digest"):position("# 5b.")]
+    assert "timeout-minutes: 10" in send
+
+
+def test_a_manual_run_never_waits_because_the_gate_gives_it_wait_zero():
+    # gate.py writes wait=0 for any event that is not "schedule" (see tests/test_gate.py); the step then skips itself.
+    assert "steps.gate.outputs.wait != '0'" in wait_block()
