@@ -92,7 +92,7 @@ flowchart LR
     end
 
     subgraph cloud["GitHub Actions (free)"]
-        digest["Daily digest<br/>hourly, 7 AM-5 PM window"]
+        digest["Daily digest<br/>hourly, sends at 7 AM or later"]
         results["Results job<br/>every morning"]
         recap["Results recap<br/>checks every 3 min from about 10 PM"]
     end
@@ -130,10 +130,10 @@ flowchart LR
 The daily digest in more detail:
 
 ```
-GitHub Actions (cron: every hour at :15, 12:15-22:15 UTC)
+GitHub Actions (cron: every hour at :15, 07:15-22:15 UTC)
         │
         ▼
-   gate.py  ── inside the 7 AM-5 PM Central window? already sent today? (else stop)
+   gate.py  ── inside the 7 AM-5 PM window (or up to 5.5 h early: then wait)? already sent today? (else stop)
         │
         ▼
    main.py  ── fetch, format, send, and leave a "sent today" marker
@@ -154,8 +154,8 @@ GitHub's cron runs on UTC, which doesn't follow daylight saving, and GitHub star
 
 The fix is to stop depending on one moment:
 
-1. The workflow starts every hour at 15 minutes past, from 12:15 to 22:15 UTC. That covers 7:15 AM to 5 PM Central in both summer and winter. GitHub is busiest at the top of the hour and recommends avoiding :00, so the schedule uses :15.
-2. `gate.py` lets a run through only if it is inside that window. The first run inside it sends the digest.
+1. The workflow starts every hour at 15 minutes past, from 07:15 to 22:15 UTC. That covers 2:15 AM to 5 PM Central in both summer and winter: runs from 7:15 AM on send at once, and runs that start earlier (after 1:30 AM) wait in the job until 7:00 AM and then send. GitHub is busiest at the top of the hour and recommends avoiding :00, so the schedule uses :15.
+2. `gate.py` lets a run through only if it is inside that window, or up to 5.5 hours before it opens (it then reports how long to wait). The first run inside it sends the digest.
 3. `main.py` then writes a small marker, which the workflow saves in GitHub's cache under today's date. Later runs find the marker and do nothing, so you get one digest a day.
 4. If a run is late or fails completely, the next hour's run covers it. A concurrency lock stops two runs from sending at once.
 
@@ -211,8 +211,9 @@ Everything in this project that happens on a schedule starts from GitHub's cron 
 
 - **At most one scheduled run an hour per workflow.** On Nov 10 the recap had two slots an hour and got exactly one run in each of 17 hours; the digest got one. More cron slots do not add runs, so there is nothing to gain from listing more.
 - **Late starts:** typically 5 to 70 minutes, sometimes 2 hours or more (the 12:15 slot at 13:25 UTC; the 19:15 slot at 21:28 UTC).
-- **Bad days:** from Nov 12 the timer started far fewer runs for the whole GitHub account, not just this repository. The digest got 2 runs on Nov 12 and none on Nov 13, the recap 4 runs in 26 hours, and an unrelated hourly collector in another repository fell from about 20 runs a day to 8 and then 2. GitHub's status page showed no incident for it.
-- **What the project does about it:** the digest window is wide (7 AM to 5 PM) so a late run still sends; the recap checker waits in the job so one evening run is enough; both have an alarm on healthchecks.io that tells you from outside GitHub; and a manual **Run workflow** sends the digest by hand and leaves the "sent today" marker so no duplicate follows.
+- **Bad days:** from Nov 12 the timer started far fewer runs for the whole GitHub account, not just this repository. The digest got 2 runs on Nov 12 and none on Nov 13, the recap 4 runs in 26 hours, and an unrelated hourly collector in another repository fell from about 20 runs a day to 8 and then 2. GitHub's status page showed no incident for it. Since then it has settled at about three runs a day per workflow, at times it picks: the digest arrived at 12:06 PM, 12:52 PM, 4:07 PM and 2:57 PM Central on Nov 14 to 17, and the single-slot daily results run starts 6 to 10 hours late. The early digest slots (7:15 to 11:15 AM) were honored 0 times in 5 days. **Cron times cannot aim these runs:** there is no stable delay to compensate for, so the only lever is what a run does once it starts.
+- **What the project does about it:** the digest window is wide (7 AM to 5 PM) so a late run still sends, and the cron also covers the night: a run that GitHub happens to start between 1:30 AM and 7:00 AM Central waits in the job until 7:00 AM and then sends, so the brief can still arrive on time (the recap workflow had a pre-dawn run on 3 of 4 nights). The recap checker waits in the job too, from up to 2 hours before the earliest finish, so one evening run is enough. Both have an alarm on healthchecks.io that tells you from outside GitHub, and a manual **Run workflow** sends the digest by hand and leaves the "sent today" marker so no duplicate follows.
+- **One catch of waiting early:** a run that started early holds the digest's concurrency lock until it sends at 7:00 AM, so a manual **Run workflow** pressed before 7 AM queues behind it and then also sends, which gives two copies of the brief. Press it after 7 AM, when it sends at once.
 - **What it cannot do:** if GitHub starts no run at all, nothing inside this repository can start one. The only real cure is a second trigger that is not GitHub's timer, for example a free cron service that calls GitHub's API on time with a narrow token. That is not set up, because it means storing a token with a third-party service.
 
 ### Missed-recap alarm

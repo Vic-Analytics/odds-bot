@@ -111,3 +111,9 @@ LOW_CREDITS_WARNING = 50
 # arrives at 4 PM is better than no brief. See gate.py and daily-odds.yml.
 SEND_FROM_HOUR = 7
 SEND_UNTIL_HOUR = 17
+
+# GitHub now starts only about three scheduled runs a day, at times it picks. A run that starts BEFORE the
+# window opens, but no more than this many minutes before it, does not give up: it waits in the job until
+# 7:00 AM and then sends, so the brief arrives at 7:00 when GitHub starts a run in the early hours (it does
+# for the recap most nights). 330 minutes = 1:30 AM; a job may live 6 hours, so this must stay under 350.
+EARLY_START_MINUTES = 330
